@@ -211,11 +211,13 @@ if [ "${NO_VENV}" = false ]; then
         # Activate and check for key packages
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
-        if ! python -c "import pandas, pyarrow" 2>/dev/null; then
-            warning "Key packages missing, reinstalling..."
+        # Check for all required dependencies (not just pandas/pyarrow since pyarrow comes from Arrow module)
+        if ! python -c "import pandas, rich, pydantic, PIL" 2>/dev/null; then
+            warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
             cd "${PROJECT_ROOT}"
-            pip install -e .
+            pip install -e . || error_exit "Failed to reinstall dependencies" 4
+            info "Dependencies reinstalled"
         else
             info "Dependencies verified"
         fi
