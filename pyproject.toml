@@ -1,8 +1,11 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "spatial-building-embeddings"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pandas>=2.3.3",
@@ -12,3 +15,9 @@ dependencies = [
     "pydantic-settings>=2.11.0",
     "rich>=14.2.0",
 ]
+
+[tool.setuptools]
+# Exclude utility directories from package discovery
+# These are scripts/tools, not installable packages
+packages = []
+
