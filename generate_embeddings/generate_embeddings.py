@@ -13,6 +13,14 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
+# Add project root to sys.path before imports
+# This ensures imports work when script is run directly
+if __name__ == "__main__":
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+
 import numpy as np
 import pandas as pd
 import torch
