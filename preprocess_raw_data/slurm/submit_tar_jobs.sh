@@ -219,7 +219,7 @@ if [ "${NO_VENV}" = false ]; then
             # Install dependencies directly (pyarrow is provided by Arrow module, so skip it)
             # Use --ignore-installed to force installation in venv even if system packages exist
             # Note: We allow pip to search both wheelhouse and PyPI (wheelhouse preferred when available)
-            pip install --ignore-installed "pandas>=2.3.3" "pillow>=12.0.0" "pydantic>=2.12.4" "pydantic-settings>=2.11.0" "rich>=14.2.0" || error_exit "Failed to reinstall dependencies" 4
+            pip install --ignore-installed "pandas>=2.0.0" "pillow>=10.0.0" "pydantic>=2.0.0" "pydantic-settings>=2.0.0" "rich>=13.0.0" || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -242,7 +242,7 @@ if [ "${NO_VENV}" = false ]; then
         # Install dependencies directly (pyarrow is provided by Arrow module, so skip it)
         # Use --ignore-installed to force installation in venv even if system packages exist
         # Note: We allow pip to search both wheelhouse and PyPI (wheelhouse preferred when available)
-        pip install --ignore-installed "pandas>=2.3.3" "pillow>=12.0.0" "pydantic>=2.12.4" "pydantic-settings>=2.11.0" "rich>=14.2.0" || error_exit "Failed to install project dependencies" 4
+        pip install --ignore-installed "pandas>=2.0.0" "pillow>=10.0.0" "pydantic>=2.0.0" "pydantic-settings>=2.0.0" "rich>=13.0.0" || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
