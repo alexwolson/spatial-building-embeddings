@@ -102,6 +102,9 @@ if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" ]; then
     exit 1
 fi
 
+# Add project root to PYTHONPATH so imports work
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
 # Create temporary config file in temp directory
 CONFIG_DIR="${TMPDIR:-/tmp}"
 CONFIG_FILE="${CONFIG_DIR}/process_tar_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.toml"

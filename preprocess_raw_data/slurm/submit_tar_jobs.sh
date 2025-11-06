@@ -260,10 +260,18 @@ fi
 info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
-mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/../logs"
-mkdir -p "${LOG_DIR}"
+mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
+
+# Verify directories were created
+if [ ! -d "${OUTPUT_DIR}" ]; then
+    error_exit "Output directory does not exist: ${OUTPUT_DIR}" 2
+fi
+if [ ! -d "${LOG_DIR}" ]; then
+    error_exit "Log directory does not exist: ${LOG_DIR}" 2
+fi
 
 info "Output directory: ${OUTPUT_DIR}"
 info "Log directory: ${LOG_DIR}"
