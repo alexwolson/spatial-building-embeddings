@@ -14,6 +14,7 @@
 # Environment variables expected:
 #   TAR_LIST_FILE: Path to file containing list of tar files (one per line)
 #   OUTPUT_DIR: Directory for output Parquet files
+#   PROJECT_ROOT: Path to project root directory (optional, will auto-detect if not set)
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
 #   PYTHON_MODULE: Python module to load (e.g., python/3.12)
 #   ARROW_MODULE: Arrow module to load for PyArrow (optional, e.g., arrow/17.0.0)
@@ -84,18 +85,38 @@ if [ -f "${OUTPUT_FILE}" ]; then
     exit 0
 fi
 
-# Step 6: Run processing script
+# Step 6: Create config file and run processing script
 echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# Determine project root - use environment variable if set, otherwise auto-detect
+if [ -z "${PROJECT_ROOT:-}" ]; then
+    # Get the directory where this script is located
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
+fi
+
+if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" ]; then
+    echo "Error: process_tar.py not found at ${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" >&2
+    exit 1
+fi
+
+# Create temporary config file
+CONFIG_FILE="${SLURM_SUBMIT_DIR:-.}/process_tar_${SLURM_ARRAY_TASK_ID}.toml"
+cat > "${CONFIG_FILE}" << EOF
+[process_tar]
+tar_file = "${TAR_FILE}"
+output_dir = "${OUTPUT_DIR}"
+EOF
 
 python "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" \
-    "${TAR_FILE}" \
-    "${OUTPUT_DIR}"
+    --config "${CONFIG_FILE}"
 
 EXIT_CODE=$?
+
+# Clean up config file
+rm -f "${CONFIG_FILE}"
 
 # Step 7: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then

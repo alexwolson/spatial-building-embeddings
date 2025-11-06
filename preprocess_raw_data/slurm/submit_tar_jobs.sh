@@ -300,8 +300,8 @@ info "Submitting job array for ${NUM_TARS} tar file(s)"
 # Step 9: Submit job array
 SBATCH_SCRIPT="${SCRIPT_DIR}/process_tar_array.sbatch"
 
-# Build export string - only include VENV_PATH and ARROW_MODULE if they're set
-EXPORT_VARS="ALL,TAR_LIST_FILE=${TAR_LIST_FILE},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR}"
+# Build export string - include PROJECT_ROOT and other variables
+EXPORT_VARS="ALL,TAR_LIST_FILE=${TAR_LIST_FILE},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi
