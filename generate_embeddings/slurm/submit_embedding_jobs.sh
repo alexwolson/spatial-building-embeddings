@@ -258,19 +258,17 @@ if [ "${NO_VENV}" = false ]; then
             warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
             cd "${PROJECT_ROOT}"
-            # Install huggingface_hub first - if hf-xet fails to build, that's okay (it's optional)
+            # Install dependencies - hf-xet may fail to build (requires newer Rust), but that's okay
             # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
-            if ! pip install "huggingface-hub>=0.36.0" 2>&1; then
-                # If installation failed, check if huggingface_hub is actually importable
+            if ! pip install -e . 2>&1; then
+                # If installation failed, verify required packages are actually importable
                 # (hf-xet build failure is non-fatal)
-                if ! python -c "import huggingface_hub" 2>/dev/null; then
-                    error_exit "Failed to install huggingface_hub" 4
+                if ! python -c "import pandas, rich, pydantic, PIL, torch, timm, huggingface_hub" 2>/dev/null; then
+                    error_exit "Failed to install required dependencies" 4
                 else
-                    warning "hf-xet failed to build, but huggingface_hub is available (this is okay)"
+                    warning "Some optional dependencies failed to build, but required packages are available"
                 fi
             fi
-            # Now install the rest of the dependencies
-            pip install -e . || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -290,19 +288,17 @@ if [ "${NO_VENV}" = false ]; then
         
         pip install --upgrade pip
         cd "${PROJECT_ROOT}"
-        # Install huggingface_hub first - if hf-xet fails to build, that's okay (it's optional)
+        # Install dependencies - hf-xet may fail to build (requires newer Rust), but that's okay
         # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
-        if ! pip install "huggingface-hub>=0.36.0" 2>&1; then
-            # If installation failed, check if huggingface_hub is actually importable
+        if ! pip install -e . 2>&1; then
+            # If installation failed, verify required packages are actually importable
             # (hf-xet build failure is non-fatal)
-            if ! python -c "import huggingface_hub" 2>/dev/null; then
-                error_exit "Failed to install huggingface_hub" 4
+            if ! python -c "import pandas, rich, pydantic, PIL, torch, timm, huggingface_hub" 2>/dev/null; then
+                error_exit "Failed to install required dependencies" 4
             else
-                warning "hf-xet failed to build, but huggingface_hub is available (this is okay)"
+                warning "Some optional dependencies failed to build, but required packages are available"
             fi
         fi
-        # Now install the rest of the dependencies
-        pip install -e . || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
