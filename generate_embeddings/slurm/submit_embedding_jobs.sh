@@ -29,6 +29,10 @@
 #   # Basic usage with automatic venv creation
 #   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings --account <ACCOUNT>
 #
+#   # Test with a single file first
+#   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings \
+#       --account <ACCOUNT> --test
+#
 #   # Use existing venv
 #   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings \
 #       --account <ACCOUNT> --venv-path ~/venv/myenv
