@@ -23,8 +23,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 import timm
 
-# Import config - use relative import since we're in the same package
-from config import GenerateEmbeddingsConfig, load_config_from_file
+from generate_embeddings.config import GenerateEmbeddingsConfig, load_config_from_file
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
@@ -280,16 +279,34 @@ def process_intermediate_file(
             logger.error(f"Failed to extract tar file: {e}")
             raise
 
+        # Debug: Check extraction structure
+        extract_subdirs = [d for d in temp_extract_dir.iterdir() if d.is_dir()]
+        if extract_subdirs:
+            logger.info(f"Extracted structure: found {len(extract_subdirs)} top-level directories")
+            # Check if we need to adjust path resolution
+            sample_dir = extract_subdirs[0]
+            sample_files = list(sample_dir.rglob("*.jpg"))[:3]
+            if sample_files:
+                logger.info(f"Sample extracted image path: {sample_files[0].relative_to(temp_extract_dir)}")
+
         # Load model and transforms
         model, transform = load_model_and_transforms(model_name)
 
         # Get image paths from dataframe
         image_paths = df["image_path"].tolist()
+        
+        # Debug: Check first few paths from parquet
+        if image_paths:
+            logger.info(f"Sample parquet image path: {image_paths[0]}")
 
         # Filter out missing images
         valid_indices = []
         valid_image_paths = []
         for idx, rel_path in enumerate(image_paths):
+            # Ensure rel_path is a Path object and handle string paths
+            if isinstance(rel_path, str):
+                rel_path = Path(rel_path)
+            
             full_path = temp_extract_dir / rel_path
             # Try .jpg and .jpeg extensions
             found = False
@@ -300,14 +317,16 @@ def process_intermediate_file(
                     alt_path = full_path.with_suffix(ext)
                     if alt_path.exists():
                         found = True
+                        full_path = alt_path
                         break
 
             if found:
                 valid_indices.append(idx)
-                valid_image_paths.append(Path(rel_path))
+                valid_image_paths.append(rel_path)
             else:
                 stats["missing_images"] += 1
-                logger.warning(f"Image not found: {rel_path}")
+                # Log both the relative path and the full path we tried
+                logger.warning(f"Image not found: {rel_path} (tried: {full_path})")
 
         if not valid_image_paths:
             logger.error("No valid images found")
