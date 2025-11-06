@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=<ACCOUNT>          # Required: Resource Allocation Project (set via submit script)
 #SBATCH --time=2:00:00                    # Default: 2 hours (adjustable)
-#SBATCH --mem-per-cpu=2G                 # Standard recommendation from best practices
+#SBATCH --mem-per-cpu=4G                 # Increased for image processing (tar extraction + pandas operations)
 #SBATCH --cpus-per-task=1                 # Serial processing, no parallelization
 #SBATCH --array=1-1%10                    # Default: 1 task (overridden by submit script)
 #SBATCH --job-name=process_tar_array
