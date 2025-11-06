@@ -160,7 +160,7 @@ batch_size = ${BATCH_SIZE}
 temp_dir = "${EXTRACT_DIR}"
 EOF
 
-python "${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" \
+srun python -m generate_embeddings.generate_embeddings \
     --config "${CONFIG_FILE}"
 
 EXIT_CODE=$?
@@ -176,4 +176,3 @@ echo "Processing completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Output file: ${OUTPUT_FILE}"
 
 exit 0
-
