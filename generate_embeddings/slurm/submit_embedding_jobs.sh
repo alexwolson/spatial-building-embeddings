@@ -57,8 +57,7 @@ RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
-# Note: hf-xet (optional huggingface_hub dependency) is disabled via HF_HUB_DISABLE_XET=1
-# to avoid Rust version compatibility issues
+# Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
 PROJECT_ROOT=""
 NO_VENV=false
 
@@ -238,10 +237,8 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
     fi
     
-    # Disable hf-xet (optional dependency of huggingface_hub that requires newer Rust)
-    # This allows huggingface_hub to work without building hf-xet
-    export HF_HUB_DISABLE_XET=1
-    info "Disabled hf-xet (HF_HUB_DISABLE_XET=1) - using standard HTTP downloads"
+    # Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
+    # (hf-xet requires Rust 1.88+ but Nibi has Rust 1.85)
     
     # Check if venv exists
     if [ -d "${VENV_PATH}" ]; then
@@ -252,23 +249,11 @@ if [ "${NO_VENV}" = false ]; then
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
         # Check for all required dependencies including torch and timm
-        # Note: We check for torch and timm, but hf-xet (huggingface_hub dependency) may fail
-        # if Rust is not available - this is handled by loading Rust module above
         if ! python -c "import pandas, rich, pydantic, PIL, torch, timm" 2>/dev/null; then
             warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
             cd "${PROJECT_ROOT}"
-            # Install dependencies - hf-xet may fail to build (requires newer Rust), but that's okay
-            # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
-            if ! pip install -e . 2>&1; then
-                # If installation failed, verify required packages are actually importable
-                # (hf-xet build failure is non-fatal)
-                if ! python -c "import pandas, rich, pydantic, PIL, torch, timm, huggingface_hub" 2>/dev/null; then
-                    error_exit "Failed to install required dependencies" 4
-                else
-                    warning "Some optional dependencies failed to build, but required packages are available"
-                fi
-            fi
+            pip install -e . || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -288,17 +273,7 @@ if [ "${NO_VENV}" = false ]; then
         
         pip install --upgrade pip
         cd "${PROJECT_ROOT}"
-        # Install dependencies - hf-xet may fail to build (requires newer Rust), but that's okay
-        # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
-        if ! pip install -e . 2>&1; then
-            # If installation failed, verify required packages are actually importable
-            # (hf-xet build failure is non-fatal)
-            if ! python -c "import pandas, rich, pydantic, PIL, torch, timm, huggingface_hub" 2>/dev/null; then
-                error_exit "Failed to install required dependencies" 4
-            else
-                warning "Some optional dependencies failed to build, but required packages are available"
-            fi
-        fi
+        pip install -e . || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
@@ -384,8 +359,6 @@ fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
-# Export HF_HUB_DISABLE_XET to batch jobs as well
-EXPORT_VARS="${EXPORT_VARS},HF_HUB_DISABLE_XET=1"
 
 # Submit job
 # Note: --account, --time, --array, --mem-per-cpu, and log paths are specified on command line and override script defaults

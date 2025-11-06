@@ -20,7 +20,6 @@
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
 #   PYTHON_MODULE: Python module to load (e.g., python/3.12)
 #   ARROW_MODULE: Arrow module to load for PyArrow (optional, e.g., arrow/17.0.0)
-#   HF_HUB_DISABLE_XET: Set to 1 to disable hf-xet (optional dependency that requires Rust)
 #   MODEL_NAME: Timm model name (default: vit_base_patch14_dinov2.lvd142m)
 #   BATCH_SIZE: Batch size for inference (default: 128)
 
@@ -54,11 +53,6 @@ if [ -n "${ARROW_MODULE:-}" ]; then
     module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
 fi
 
-# Step 3b: Disable hf-xet if not already set (optional dependency that requires newer Rust)
-if [ -z "${HF_HUB_DISABLE_XET:-}" ]; then
-    export HF_HUB_DISABLE_XET=1
-    echo "Disabled hf-xet (HF_HUB_DISABLE_XET=1) - using standard HTTP downloads"
-fi
 
 # Step 4: Load Python module
 if [ -n "${PYTHON_MODULE:-}" ]; then
