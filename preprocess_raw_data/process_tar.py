@@ -20,8 +20,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-# Configure rich console for file-aware output
-console = Console()
+from preprocess_raw_data.config import ProcessTarConfig, load_config_from_file
 
 
 class MetadataEntry(NamedTuple):
@@ -174,11 +173,8 @@ def process_tar_file(
         }
 
     # Create temporary directory for extraction
-    use_temp = temp_dir is None
-    if use_temp:
-        temp_extract_dir = Path(tempfile.mkdtemp())
-    else:
-        temp_extract_dir = temp_dir
+    temp_extract_dir = temp_dir or Path(tempfile.mkdtemp())
+    should_cleanup = temp_dir is None
 
     try:
         # Extract tar file
@@ -222,7 +218,6 @@ def process_tar_file(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TaskProgressColumn(),
-            console=console,
             refresh_per_second=1,  # Update once per second to minimize log file bloat
         ) as progress:
             task = progress.add_task("Processing metadata files...", total=len(txt_files))
@@ -284,17 +279,14 @@ def process_tar_file(
             return stats
 
         df = pd.DataFrame(entries)
-        df = df.astype(
-            {
-                "target_id": "int64",
-                "patch_id": "int64",
-                "street_view_id": "int64",
-                "target_lat": "float64",
-                "target_lon": "float64",
-                "image_path": "string",
-                "tar_file": "string",
-            }
-        )
+        # Ensure correct dtypes (pandas should infer correctly, but be explicit for Parquet)
+        df = df.astype({
+            "target_id": "int64",
+            "patch_id": "int64",
+            "street_view_id": "int64",
+            "target_lat": "float64",
+            "target_lon": "float64",
+        })
 
         # Write Parquet file
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -313,7 +305,7 @@ def process_tar_file(
 
     finally:
         # Clean up temporary directory
-        if use_temp and temp_extract_dir.exists():
+        if should_cleanup and temp_extract_dir.exists():
             import shutil
 
             shutil.rmtree(temp_extract_dir)
@@ -326,53 +318,57 @@ def main() -> int:
         description="Process a single tar archive and output intermediate Parquet file"
     )
     parser.add_argument(
-        "tar_file",
+        "--config",
         type=Path,
-        help="Path to tar file to process",
-    )
-    parser.add_argument(
-        "output_dir",
-        type=Path,
-        help="Output directory for intermediate Parquet files",
-    )
-    parser.add_argument(
-        "--log-file",
-        type=Path,
-        help="Optional log file path (default: stderr)",
-    )
-    parser.add_argument(
-        "--temp-dir",
-        type=Path,
-        help="Optional temporary directory for extraction (default: auto-create)",
+        help="Path to TOML config file. If not provided, config is loaded from environment variables.",
     )
 
     args = parser.parse_args()
 
-    # Validate inputs
-    if not args.tar_file.exists():
-        console.print(f"[red]Error: Tar file not found: {args.tar_file}[/red]")
+    # Set up logger early (before config loading to catch config errors)
+    logger = setup_logging(None)
+
+    # Load configuration
+    try:
+        if args.config:
+            config = load_config_from_file(args.config, "process_tar")
+        else:
+            # Load from environment variables
+            config = ProcessTarConfig()
+    except Exception as e:
+        logger.error(f"Error loading configuration: {e}")
         return 1
 
-    if not args.tar_file.suffix == ".tar":
-        console.print(f"[yellow]Warning: File does not have .tar extension: {args.tar_file}[/yellow]")
+    # Re-setup logger with log file if specified
+    if config.log_file:
+        logger = setup_logging(config.log_file)
+
+    # Validate inputs
+    if not config.tar_file.exists():
+        logger.error(f"Tar file not found: {config.tar_file}")
+        return 1
+
+    if not config.tar_file.suffix == ".tar":
+        logger.warning(f"File does not have .tar extension: {config.tar_file}")
 
     # Process tar file
     stats = process_tar_file(
-        tar_path=args.tar_file,
-        output_dir=args.output_dir,
-        temp_dir=args.temp_dir,
-        log_file=args.log_file,
+        tar_path=config.tar_file,
+        output_dir=config.output_dir,
+        temp_dir=config.temp_dir,
+        log_file=config.log_file,
     )
 
     # Print summary
-    console.print("\n[bold]Processing Summary:[/bold]")
-    console.print(f"  Total metadata files: {stats['total_metadata_files']}")
-    console.print(f"  Valid entries: {stats['valid_entries']}")
-    console.print(f"  Invalid entries: {stats['invalid_entries']}")
+    logger.info("")
+    logger.info("Processing Summary:")
+    logger.info(f"  Total metadata files: {stats['total_metadata_files']}")
+    logger.info(f"  Valid entries: {stats['valid_entries']}")
+    logger.info(f"  Invalid entries: {stats['invalid_entries']}")
     if stats["invalid_entries"] > 0:
-        console.print(f"    - Missing images: {stats['missing_images']}")
-        console.print(f"    - Corrupted images: {stats['corrupted_images']}")
-        console.print(f"    - Orphan metadata: {stats['orphan_metadata']}")
+        logger.info(f"    - Missing images: {stats['missing_images']}")
+        logger.info(f"    - Corrupted images: {stats['corrupted_images']}")
+        logger.info(f"    - Orphan metadata: {stats['orphan_metadata']}")
 
     return 0 if stats["valid_entries"] > 0 else 1
 
