@@ -16,6 +16,7 @@
 #   OUTPUT_DIR: Directory for output Parquet files
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
 #   PYTHON_MODULE: Python module to load (e.g., python/3.12)
+#   ARROW_MODULE: Arrow module to load for PyArrow (optional, e.g., arrow/17.0.0)
 
 set -euo pipefail
 
@@ -32,7 +33,14 @@ echo "=========================================="
 # Step 1: Clean environment (best practice)
 module purge
 
-# Step 2: Load Python module
+# Step 2: Load Arrow module (required for PyArrow, must be loaded before Python/venv)
+if [ -n "${ARROW_MODULE:-}" ]; then
+    echo "Loading Arrow module: ${ARROW_MODULE}"
+    module load gcc 2>/dev/null || true
+    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
+fi
+
+# Step 3: Load Python module
 if [ -n "${PYTHON_MODULE:-}" ]; then
     echo "Loading Python module: ${PYTHON_MODULE}"
     module load "${PYTHON_MODULE}"
@@ -40,7 +48,7 @@ else
     echo "Warning: PYTHON_MODULE not set, using system Python"
 fi
 
-# Step 3: Activate Python virtual environment (if using venv)
+# Step 4: Activate Python virtual environment (if using venv)
 if [ -n "${VENV_PATH:-}" ]; then
     if [ ! -d "${VENV_PATH}" ]; then
         echo "Error: Virtual environment not found at ${VENV_PATH}" >&2

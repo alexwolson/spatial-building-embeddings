@@ -52,6 +52,7 @@ MAX_CONCURRENT=10
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
+ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
 PROJECT_ROOT=""
 NO_VENV=false
 
@@ -194,6 +195,14 @@ if [ "${NO_VENV}" = false ]; then
         error_exit "Python module not available: ${PYTHON_MODULE}. Check with 'module avail python'" 3
     fi
     
+    # Load Arrow module before venv operations (required for PyArrow)
+    if [ -n "${ARROW_MODULE}" ]; then
+        info "Loading Arrow module: ${ARROW_MODULE}"
+        # Load gcc first (required by Arrow module)
+        module load gcc 2>/dev/null || true
+        module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
+    fi
+    
     # Check if venv exists
     if [ -d "${VENV_PATH}" ]; then
         info "Virtual environment exists: ${VENV_PATH}"
@@ -217,7 +226,7 @@ if [ "${NO_VENV}" = false ]; then
         # Load Python module
         module load "${PYTHON_MODULE}"
         
-        # Create venv
+        # Create venv (Arrow module should already be loaded)
         python -m venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
         
         # Activate and install dependencies
@@ -239,7 +248,7 @@ else
     VENV_PATH=""  # Clear VENV_PATH for system Python
 fi
 
-# Step 4: Create output and log directories
+# Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/../logs"
@@ -255,7 +264,7 @@ find "${INPUT_DIR}" -name "*.tar" -type f | sort > "${TAR_LIST_FILE}"
 # Step 6: Count tar files
 NUM_TARS=$(wc -l < "${TAR_LIST_FILE}")
 
-# Step 7: If --resume flag, filter out already-processed files
+# Step 8: If --resume flag, filter out already-processed files
 if [ "${RESUME}" = true ]; then
     info "Resume mode: checking for already-processed files..."
     TEMP_LIST="${TAR_LIST_FILE}.temp"
@@ -288,13 +297,16 @@ fi
 
 info "Submitting job array for ${NUM_TARS} tar file(s)"
 
-# Step 8: Submit job array
+# Step 9: Submit job array
 SBATCH_SCRIPT="${SCRIPT_DIR}/process_tar_array.sbatch"
 
-# Build export string - only include VENV_PATH if it's set
+# Build export string - only include VENV_PATH and ARROW_MODULE if they're set
 EXPORT_VARS="ALL,TAR_LIST_FILE=${TAR_LIST_FILE},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR}"
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
+fi
+if [ -n "${ARROW_MODULE:-}" ]; then
+    EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
 
 # Submit job
