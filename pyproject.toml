@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
+    "huggingface-hub>=0.36.0",
     "pandas>=2.0.0",
     "pillow>=10.0.0",
     # Note: pyarrow is deliberately NOT included here because it is provided by the Arrow module

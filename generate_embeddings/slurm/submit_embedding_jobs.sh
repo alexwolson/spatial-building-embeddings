@@ -57,6 +57,7 @@ RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
+RUST_MODULE="rust"  # Rust module for building packages that require Rust (e.g., hf-xet)
 PROJECT_ROOT=""
 NO_VENV=false
 
@@ -236,6 +237,16 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
     fi
     
+    # Load Rust module if available (needed for some Python packages like hf-xet)
+    if [ -n "${RUST_MODULE:-}" ]; then
+        if module avail "${RUST_MODULE}" 2>/dev/null | grep -q "${RUST_MODULE}"; then
+            info "Loading Rust module: ${RUST_MODULE}"
+            module load "${RUST_MODULE}" || warning "Failed to load Rust module - some packages may fail to build"
+        else
+            warning "Rust module not available: ${RUST_MODULE}"
+        fi
+    fi
+    
     # Check if venv exists
     if [ -d "${VENV_PATH}" ]; then
         info "Virtual environment exists: ${VENV_PATH}"
@@ -245,6 +256,8 @@ if [ "${NO_VENV}" = false ]; then
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
         # Check for all required dependencies including torch and timm
+        # Note: We check for torch and timm, but hf-xet (huggingface_hub dependency) may fail
+        # if Rust is not available - this is handled by loading Rust module above
         if ! python -c "import pandas, rich, pydantic, PIL, torch, timm" 2>/dev/null; then
             warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
@@ -357,6 +370,9 @@ if [ -n "${VENV_PATH:-}" ]; then
 fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
+fi
+if [ -n "${RUST_MODULE:-}" ]; then
+    EXPORT_VARS="${EXPORT_VARS},RUST_MODULE=${RUST_MODULE}"
 fi
 
 # Submit job
