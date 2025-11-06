@@ -160,7 +160,7 @@ batch_size = ${BATCH_SIZE}
 temp_dir = "${EXTRACT_DIR}"
 EOF
 
-cd "${PROJECT_ROOT}" && python -m generate_embeddings.generate_embeddings \
+cd "${PROJECT_ROOT}" && python generate_embeddings/generate_embeddings.py \
     --config "${CONFIG_FILE}"
 
 EXIT_CODE=$?
