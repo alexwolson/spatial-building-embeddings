@@ -242,6 +242,7 @@ if [ "${NO_VENV}" = false ]; then
         # Install dependencies directly (pyarrow is provided by Arrow module, so skip it)
         # Use --ignore-installed to force installation in venv even if system packages exist
         # Note: We allow pip to search both wheelhouse and PyPI (wheelhouse preferred when available)
+        # Dependency conflict warnings are informational - pip exits with 0 even if warnings are shown
         pip install --ignore-installed "pandas>=2.0.0" "pillow>=10.0.0" "pydantic>=2.0.0" "pydantic-settings>=2.0.0" "rich>=13.0.0" || error_exit "Failed to install project dependencies" 4
         
         deactivate
@@ -255,6 +256,8 @@ else
     fi
     VENV_PATH=""  # Clear VENV_PATH for system Python
 fi
+
+info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}"
