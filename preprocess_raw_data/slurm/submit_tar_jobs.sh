@@ -216,7 +216,8 @@ if [ "${NO_VENV}" = false ]; then
             warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
             cd "${PROJECT_ROOT}"
-            pip install -e . || error_exit "Failed to reinstall dependencies" 4
+            # Install dependencies directly (pyarrow is provided by Arrow module, so skip it)
+            pip install "pandas>=2.3.3" "pillow>=12.0.0" "pydantic>=2.12.4" "pydantic-settings>=2.11.0" "rich>=14.2.0" || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -236,7 +237,8 @@ if [ "${NO_VENV}" = false ]; then
         
         pip install --upgrade pip
         cd "${PROJECT_ROOT}"
-        pip install -e . || error_exit "Failed to install project dependencies" 4
+        # Install dependencies directly (pyarrow is provided by Arrow module, so skip it)
+        pip install "pandas>=2.3.3" "pillow>=12.0.0" "pydantic>=2.12.4" "pydantic-settings>=2.11.0" "rich>=14.2.0" || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
