@@ -102,8 +102,16 @@ if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" ]; then
     exit 1
 fi
 
-# Create temporary config file
-CONFIG_FILE="${SLURM_SUBMIT_DIR:-.}/process_tar_${SLURM_ARRAY_TASK_ID}.toml"
+# Create temporary config file in temp directory
+CONFIG_DIR="${TMPDIR:-/tmp}"
+CONFIG_FILE="${CONFIG_DIR}/process_tar_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.toml"
+
+# Ensure cleanup on exit
+cleanup() {
+    rm -f "${CONFIG_FILE}"
+}
+trap cleanup EXIT
+
 cat > "${CONFIG_FILE}" << EOF
 [process_tar]
 tar_file = "${TAR_FILE}"
@@ -114,9 +122,6 @@ python "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" \
     --config "${CONFIG_FILE}"
 
 EXIT_CODE=$?
-
-# Clean up config file
-rm -f "${CONFIG_FILE}"
 
 # Step 7: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then

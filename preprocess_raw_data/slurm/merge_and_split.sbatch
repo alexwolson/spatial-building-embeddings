@@ -109,8 +109,16 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # Create log file path
 LOG_FILE="${SLURM_SUBMIT_DIR:-.}/merge_${SLURM_JOB_ID}.log"
 
-# Create config file
-CONFIG_FILE="${SLURM_SUBMIT_DIR:-.}/merge_and_split_${SLURM_JOB_ID}.toml"
+# Create config file in temp directory
+CONFIG_DIR="${TMPDIR:-/tmp}"
+CONFIG_FILE="${CONFIG_DIR}/merge_and_split_${SLURM_JOB_ID}.toml"
+
+# Ensure cleanup on exit
+cleanup() {
+    rm -f "${CONFIG_FILE}"
+}
+trap cleanup EXIT
+
 cat > "${CONFIG_FILE}" << EOF
 [merge_and_split]
 intermediates_dir = "${INTERMEDIATES_DIR}"
@@ -126,9 +134,6 @@ python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
     --config "${CONFIG_FILE}"
 
 EXIT_CODE=$?
-
-# Clean up config file
-rm -f "${CONFIG_FILE}"
 
 # Step 9: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then
