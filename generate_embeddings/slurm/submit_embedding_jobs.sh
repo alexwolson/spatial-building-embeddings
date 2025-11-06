@@ -237,9 +237,6 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
     fi
     
-    # Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
-    # (hf-xet requires Rust 1.88+ but Nibi has Rust 1.85)
-    
     # Check if venv exists
     if [ -d "${VENV_PATH}" ]; then
         info "Virtual environment exists: ${VENV_PATH}"
@@ -251,9 +248,13 @@ if [ "${NO_VENV}" = false ]; then
         # Check for all required dependencies including torch and timm
         if ! python -c "import pandas, rich, pydantic, PIL, torch, timm" 2>/dev/null; then
             warning "Key packages missing, reinstalling dependencies..."
-            pip install --upgrade pip
+            # Install uv if not available
+            if ! command -v uv &> /dev/null; then
+                info "Installing uv..."
+                pip install uv || error_exit "Failed to install uv" 4
+            fi
             cd "${PROJECT_ROOT}"
-            pip install -e . || error_exit "Failed to reinstall dependencies" 4
+            uv pip install -e . || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -265,15 +266,20 @@ if [ "${NO_VENV}" = false ]; then
         # Load Python module
         module load "${PYTHON_MODULE}"
         
-        # Create venv (Arrow module should already be loaded)
-        python -m venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
+        # Install uv if not available
+        if ! command -v uv &> /dev/null; then
+            info "Installing uv..."
+            pip install uv || error_exit "Failed to install uv" 4
+        fi
+        
+        # Create venv using uv (Arrow module should already be loaded)
+        uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
         
         # Activate and install dependencies
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
-        pip install --upgrade pip
         cd "${PROJECT_ROOT}"
-        pip install -e . || error_exit "Failed to install project dependencies" 4
+        uv pip install -e . || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
