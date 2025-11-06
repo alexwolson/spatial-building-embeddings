@@ -300,25 +300,47 @@ def process_intermediate_file(
             logger.info(f"Sample parquet image path: {image_paths[0]}")
 
         # Filter out missing images
+        # The paths in parquet are stored as relative paths like "0003/0003/{stem}.jpg"
+        # After tar extraction, files are at temp_extract_dir/0003/0003/{stem}.jpg
+        # So we can directly join them
         valid_indices = []
         valid_image_paths = []
         for idx, rel_path in enumerate(image_paths):
-            # Ensure rel_path is a Path object and handle string paths
+            # Normalize path - handle both string and Path, and normalize separators
             if isinstance(rel_path, str):
+                # Normalize forward slashes (parquet stores with forward slashes)
+                rel_path = Path(rel_path.replace("\\", "/"))
+            else:
                 rel_path = Path(rel_path)
             
+            # Construct full path - paths in parquet are relative to tar root
             full_path = temp_extract_dir / rel_path
+            
             # Try .jpg and .jpeg extensions
             found = False
             if full_path.exists():
                 found = True
             else:
+                # Try alternative extensions
                 for ext in [".jpg", ".jpeg"]:
                     alt_path = full_path.with_suffix(ext)
                     if alt_path.exists():
                         found = True
                         full_path = alt_path
                         break
+                
+                # If still not found, try searching for the filename (in case path structure differs)
+                if not found:
+                    filename = full_path.name
+                    # Search in the extracted directory for this filename
+                    found_files = list(temp_extract_dir.rglob(filename))
+                    if found_files:
+                        # Use the first match
+                        full_path = found_files[0]
+                        # Update rel_path to match what we actually found
+                        rel_path = full_path.relative_to(temp_extract_dir)
+                        found = True
+                        logger.debug(f"Found image at different path: {rel_path}")
 
             if found:
                 valid_indices.append(idx)
