@@ -12,7 +12,7 @@
 #   --output-dir <DIR>        Directory for intermediate Parquet files (required)
 #   --account <ACCOUNT>       SLURM account name (required, or use SLURM_ACCOUNT env var)
 #   --time <TIME>            Time limit per job (default: 2:00:00)
-#   --max-concurrent <N>      Maximum concurrent jobs (default: 10)
+#   --max-concurrent <N>      Maximum concurrent jobs (default: unlimited, let SLURM decide)
 #   --mem-per-cpu <MEM>      Memory per CPU (default: 32G, for large tar files up to 18GB)
 #   --resume                  Skip already-processed tar files
 #   --venv-path <PATH>        Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
@@ -49,7 +49,7 @@ INPUT_DIR=""
 OUTPUT_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="2:00:00"
-MAX_CONCURRENT=10
+MAX_CONCURRENT=""  # Empty = unlimited (let SLURM scheduler decide based on resources)
 MEM_PER_CPU="32G"  # Extra safe default for large tar files (up to 18GB)
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
@@ -106,7 +106,11 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --max-concurrent)
-            MAX_CONCURRENT="$2"
+            if [ -z "$2" ] || [ "$2" = "unlimited" ]; then
+                MAX_CONCURRENT=""
+            else
+                MAX_CONCURRENT="$2"
+            fi
             shift 2
             ;;
         --mem-per-cpu)
@@ -336,11 +340,18 @@ fi
 
 # Submit job
 # Note: --account, --time, --array, --mem-per-cpu, and log paths are specified on command line and override script defaults
+# Build array specification: with or without concurrency limit
+if [ -n "${MAX_CONCURRENT}" ]; then
+    ARRAY_SPEC="1-${NUM_TARS}%${MAX_CONCURRENT}"
+else
+    ARRAY_SPEC="1-${NUM_TARS}"  # No limit - let SLURM scheduler decide
+fi
+
 SUBMIT_OUTPUT=$(sbatch \
     --account="${ACCOUNT}" \
     --time="${TIME}" \
     --mem-per-cpu="${MEM_PER_CPU}" \
-    --array=1-${NUM_TARS}%${MAX_CONCURRENT} \
+    --array="${ARRAY_SPEC}" \
     --output="${LOG_DIR}/process_tar_%A_%a.out" \
     --error="${LOG_DIR}/process_tar_%A_%a.err" \
     --export="${EXPORT_VARS}" \
