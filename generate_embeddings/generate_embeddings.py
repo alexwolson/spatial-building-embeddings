@@ -13,12 +13,6 @@ import tempfile
 from pathlib import Path
 from typing import NamedTuple
 
-# Add project root to path if not already there (for imports)
-if __name__ == "__main__":
-    project_root = Path(__file__).parent.parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-
 import numpy as np
 import pandas as pd
 import torch
@@ -29,7 +23,8 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 import timm
 
-from generate_embeddings.config import GenerateEmbeddingsConfig, load_config_from_file
+# Import config - use relative import since we're in the same package
+from config import GenerateEmbeddingsConfig, load_config_from_file
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
