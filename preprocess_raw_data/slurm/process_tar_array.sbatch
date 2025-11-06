@@ -77,6 +77,8 @@ fi
 echo "Processing tar file: ${TAR_FILE}"
 
 # Step 5: Check if output already exists (resume capability)
+# Normalize OUTPUT_DIR to remove trailing slashes
+OUTPUT_DIR="${OUTPUT_DIR%/}"
 TAR_BASENAME=$(basename "${TAR_FILE}")
 OUTPUT_FILE="${OUTPUT_DIR}/${TAR_BASENAME}.parquet"
 
