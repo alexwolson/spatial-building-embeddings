@@ -254,7 +254,9 @@ if [ "${NO_VENV}" = false ]; then
                 pip install uv || error_exit "Failed to install uv" 4
             fi
             cd "${PROJECT_ROOT}"
-            uv pip install -e . || error_exit "Failed to reinstall dependencies" 4
+            # Use Alliance wheelhouse directories if available (same as pip does)
+            WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+            uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
@@ -279,7 +281,9 @@ if [ "${NO_VENV}" = false ]; then
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
         cd "${PROJECT_ROOT}"
-        uv pip install -e . || error_exit "Failed to install project dependencies" 4
+        # Use Alliance wheelhouse directories if available (same as pip does)
+        WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+        uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to install project dependencies" 4
         
         deactivate
         
@@ -298,7 +302,7 @@ info "Environment setup complete, proceeding to job submission..."
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/../logs"
+LOG_DIR="${PROJECT_ROOT}/generate_embeddings/logs"
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 # Verify directories were created
