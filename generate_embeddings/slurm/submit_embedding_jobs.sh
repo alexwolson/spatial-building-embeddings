@@ -22,6 +22,7 @@
 #   --python-module <MODULE>   Python module to load (default: python/3.12)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
 #   --no-venv                  Use system Python instead of creating/using venv
+#   --test                     Submit only the first parquet file for testing
 #   --help                     Show this help message
 #
 # Examples:
@@ -60,6 +61,7 @@ ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance cl
 # Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
 PROJECT_ROOT=""
 NO_VENV=false
+TEST_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -150,6 +152,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-venv)
             NO_VENV=true
+            shift
+            ;;
+        --test)
+            TEST_MODE=true
             shift
             ;;
         --help)
@@ -354,6 +360,15 @@ if [ "${NUM_PARQUETS}" -eq 0 ]; then
     rm -f "${PARQUET_LIST_FILE}"
     info "No files to process (all already processed or no parquet files found)"
     exit 0
+fi
+
+# Step 8.5: If --test mode, limit to first file only
+if [ "${TEST_MODE}" = true ]; then
+    info "Test mode: limiting to first parquet file only"
+    TEMP_LIST="${PARQUET_LIST_FILE}.test"
+    head -n 1 "${PARQUET_LIST_FILE}" > "${TEMP_LIST}"
+    mv "${TEMP_LIST}" "${PARQUET_LIST_FILE}"
+    NUM_PARQUETS=1
 fi
 
 info "Submitting job array for ${NUM_PARQUETS} parquet file(s)"
