@@ -13,6 +13,7 @@
 #   --account <ACCOUNT>       SLURM account name (required, or use SLURM_ACCOUNT env var)
 #   --time <TIME>            Time limit per job (default: 2:00:00)
 #   --max-concurrent <N>      Maximum concurrent jobs (default: 10)
+#   --mem-per-cpu <MEM>      Memory per CPU (default: 16G, increase for large tar files >10GB)
 #   --resume                  Skip already-processed tar files
 #   --venv-path <PATH>        Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
 #   --python-module <MODULE>  Python module to load (default: python/3.12)
@@ -49,6 +50,7 @@ OUTPUT_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="2:00:00"
 MAX_CONCURRENT=10
+MEM_PER_CPU="16G"  # Increased default for large tar files (up to 18GB)
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
@@ -105,6 +107,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --max-concurrent)
             MAX_CONCURRENT="$2"
+            shift 2
+            ;;
+        --mem-per-cpu)
+            MEM_PER_CPU="$2"
             shift 2
             ;;
         --resume)
@@ -329,10 +335,11 @@ if [ -n "${ARROW_MODULE:-}" ]; then
 fi
 
 # Submit job
-# Note: --account, --time, --array, and log paths are specified on command line and override script defaults
+# Note: --account, --time, --array, --mem-per-cpu, and log paths are specified on command line and override script defaults
 SUBMIT_OUTPUT=$(sbatch \
     --account="${ACCOUNT}" \
     --time="${TIME}" \
+    --mem-per-cpu="${MEM_PER_CPU}" \
     --array=1-${NUM_TARS}%${MAX_CONCURRENT} \
     --output="${LOG_DIR}/process_tar_%A_%a.out" \
     --error="${LOG_DIR}/process_tar_%A_%a.err" \
