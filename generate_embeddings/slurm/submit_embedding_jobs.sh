@@ -22,14 +22,14 @@
 #   --python-module <MODULE>   Python module to load (default: python/3.12)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
 #   --no-venv                  Use system Python instead of creating/using venv
-#   --test                     Submit only the first parquet file for testing
+#   --test                     Submit only 0061.parquet for testing (smallest file)
 #   --help                     Show this help message
 #
 # Examples:
 #   # Basic usage with automatic venv creation
 #   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings --account <ACCOUNT>
 #
-#   # Test with a single file first
+#   # Test with 0061.parquet (smallest file) first
 #   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings \
 #       --account <ACCOUNT> --test
 #
@@ -366,13 +366,29 @@ if [ "${NUM_PARQUETS}" -eq 0 ]; then
     exit 0
 fi
 
-# Step 8.5: If --test mode, limit to first file only
+# Step 8.5: If --test mode, use 0061.parquet (smallest file) for testing
 if [ "${TEST_MODE}" = true ]; then
-    info "Test mode: limiting to first parquet file only"
+    info "Test mode: looking for 0061.parquet (smallest file for testing)"
+    TEST_FILE=""
+    # Look for 0061.parquet in the list
+    while IFS= read -r PARQUET_FILE; do
+        PARQUET_BASENAME=$(basename "${PARQUET_FILE}" .parquet)
+        if [ "${PARQUET_BASENAME}" = "0061" ]; then
+            TEST_FILE="${PARQUET_FILE}"
+            break
+        fi
+    done < "${PARQUET_LIST_FILE}"
+    
+    if [ -z "${TEST_FILE}" ]; then
+        warning "0061.parquet not found in list, using first file instead"
+        TEST_FILE=$(head -n 1 "${PARQUET_LIST_FILE}")
+    fi
+    
     TEMP_LIST="${PARQUET_LIST_FILE}.test"
-    head -n 1 "${PARQUET_LIST_FILE}" > "${TEMP_LIST}"
+    echo "${TEST_FILE}" > "${TEMP_LIST}"
     mv "${TEMP_LIST}" "${PARQUET_LIST_FILE}"
     NUM_PARQUETS=1
+    info "Test mode: using ${TEST_FILE}"
 fi
 
 info "Submitting job array for ${NUM_PARQUETS} parquet file(s)"
