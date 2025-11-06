@@ -57,7 +57,8 @@ RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
-RUST_MODULE="rust"  # Rust module for building packages that require Rust (e.g., hf-xet)
+# Note: hf-xet (optional huggingface_hub dependency) is disabled via HF_HUB_DISABLE_XET=1
+# to avoid Rust version compatibility issues
 PROJECT_ROOT=""
 NO_VENV=false
 
@@ -237,15 +238,10 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
     fi
     
-    # Load Rust module if available (needed for some Python packages like hf-xet)
-    if [ -n "${RUST_MODULE:-}" ]; then
-        if module avail "${RUST_MODULE}" 2>/dev/null | grep -q "${RUST_MODULE}"; then
-            info "Loading Rust module: ${RUST_MODULE}"
-            module load "${RUST_MODULE}" || warning "Failed to load Rust module - some packages may fail to build"
-        else
-            warning "Rust module not available: ${RUST_MODULE}"
-        fi
-    fi
+    # Disable hf-xet (optional dependency of huggingface_hub that requires newer Rust)
+    # This allows huggingface_hub to work without building hf-xet
+    export HF_HUB_DISABLE_XET=1
+    info "Disabled hf-xet (HF_HUB_DISABLE_XET=1) - using standard HTTP downloads"
     
     # Check if venv exists
     if [ -d "${VENV_PATH}" ]; then
@@ -262,8 +258,18 @@ if [ "${NO_VENV}" = false ]; then
             warning "Key packages missing, reinstalling dependencies..."
             pip install --upgrade pip
             cd "${PROJECT_ROOT}"
-            # Install dependencies - note that torch/timm may need to be installed via pip or module
-            # For now, try pip install -e . which should install from pyproject.toml
+            # Install huggingface_hub first - if hf-xet fails to build, that's okay (it's optional)
+            # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
+            if ! pip install "huggingface-hub>=0.36.0" 2>&1; then
+                # If installation failed, check if huggingface_hub is actually importable
+                # (hf-xet build failure is non-fatal)
+                if ! python -c "import huggingface_hub" 2>/dev/null; then
+                    error_exit "Failed to install huggingface_hub" 4
+                else
+                    warning "hf-xet failed to build, but huggingface_hub is available (this is okay)"
+                fi
+            fi
+            # Now install the rest of the dependencies
             pip install -e . || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
@@ -284,7 +290,18 @@ if [ "${NO_VENV}" = false ]; then
         
         pip install --upgrade pip
         cd "${PROJECT_ROOT}"
-        # Install dependencies from pyproject.toml
+        # Install huggingface_hub first - if hf-xet fails to build, that's okay (it's optional)
+        # We set HF_HUB_DISABLE_XET=1 above to disable it at runtime
+        if ! pip install "huggingface-hub>=0.36.0" 2>&1; then
+            # If installation failed, check if huggingface_hub is actually importable
+            # (hf-xet build failure is non-fatal)
+            if ! python -c "import huggingface_hub" 2>/dev/null; then
+                error_exit "Failed to install huggingface_hub" 4
+            else
+                warning "hf-xet failed to build, but huggingface_hub is available (this is okay)"
+            fi
+        fi
+        # Now install the rest of the dependencies
         pip install -e . || error_exit "Failed to install project dependencies" 4
         
         deactivate
@@ -371,9 +388,8 @@ fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
-if [ -n "${RUST_MODULE:-}" ]; then
-    EXPORT_VARS="${EXPORT_VARS},RUST_MODULE=${RUST_MODULE}"
-fi
+# Export HF_HUB_DISABLE_XET to batch jobs as well
+EXPORT_VARS="${EXPORT_VARS},HF_HUB_DISABLE_XET=1"
 
 # Submit job
 # Note: --account, --time, --array, --mem-per-cpu, and log paths are specified on command line and override script defaults
