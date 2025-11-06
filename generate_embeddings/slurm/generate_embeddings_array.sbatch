@@ -153,7 +153,7 @@ trap cleanup EXIT
 cat > "${CONFIG_FILE}" << EOF
 [generate_embeddings]
 parquet_file = "${PARQUET_FILE}"
-tar_file = null  # Auto-detect from parquet filename
+# tar_file omitted - will auto-detect from parquet filename
 output_dir = "${OUTPUT_DIR}"
 model_name = "${MODEL_NAME}"
 batch_size = ${BATCH_SIZE}
