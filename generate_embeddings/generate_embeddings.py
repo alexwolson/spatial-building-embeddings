@@ -13,7 +13,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import Callable, NamedTuple, Sequence
 
 # Add project root to sys.path before imports
 # This ensures imports work when script is run directly
@@ -110,14 +110,6 @@ class ImageDataset(torch.utils.data.Dataset):
     """Dataset for loading images from paths."""
 
     def __init__(self, image_paths: list[Path], transform: nn.Module, extract_dir: Path):
-        """
-        Initialize dataset.
-
-        Args:
-            image_paths: List of relative image paths from parquet
-            transform: Image transform pipeline
-            extract_dir: Base directory where tar was extracted
-        """
         self.image_paths = image_paths
         self.transform = transform
         self.extract_dir = extract_dir
@@ -126,21 +118,72 @@ class ImageDataset(torch.utils.data.Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        """Load and transform image."""
         rel_path = self.image_paths[idx]
         full_path = self.extract_dir / rel_path
 
         if not full_path.exists():
             raise FileNotFoundError(f"Image not found: {full_path}")
 
-        # Load image
         image = Image.open(full_path).convert("RGB")
-
-        # Apply transforms
         if self.transform:
             image = self.transform(image)
-
         return image
+
+
+def _normalize_relative_path(value: str | Path) -> Path:
+    value_str = str(value).strip()
+    if not value_str:
+        raise ValueError("Empty image path")
+
+    value_str = value_str.replace("\\", "/")
+    parts = [part for part in value_str.split("/") if part and part != "."]
+    if not parts:
+        raise ValueError(f"Invalid relative path: {value}")
+    return Path(*parts)
+
+
+def _drop_duplicate_second_segment(rel_path: Path) -> Path:
+    parts = rel_path.parts
+    if len(parts) >= 2 and parts[0].lower() == parts[1].lower():
+        return Path(parts[0], *parts[2:])
+    return rel_path
+
+
+def _infer_path_transform(
+    image_paths: Sequence[str], extract_dir: Path, logger: logging.Logger
+) -> Callable[[Path], Path]:
+    """Determine how parquet relative paths map to extracted files."""
+
+    samples: list[Path] = []
+    for raw in image_paths:
+        try:
+            samples.append(_normalize_relative_path(raw))
+        except ValueError:
+            continue
+        if len(samples) >= 100:
+            break
+
+    if not samples:
+        return lambda rel: rel
+
+    def identity(rel: Path) -> Path:
+        return rel
+
+    candidates: list[tuple[str, Callable[[Path], Path]]] = [
+        ("direct", identity),
+        ("drop_duplicate_second", _drop_duplicate_second_segment),
+    ]
+
+    for name, transform in candidates:
+        for sample in samples:
+            candidate_path = extract_dir / transform(sample)
+            if candidate_path.exists():
+                if name != "direct":
+                    logger.info("Detected '%s' path transform for extracted images", name)
+                return transform
+
+    logger.warning("Unable to infer path transform from samples; defaulting to direct paths")
+    return identity
 
 
 
@@ -350,20 +393,59 @@ def process_intermediate_file(
         if not image_paths.empty:
             logger.info(f"Sample parquet image path: {image_paths.iloc[0]}")
 
-        df["rel_path"] = image_paths.map(Path)
-        df["full_path"] = df["rel_path"].map(lambda rel: temp_extract_dir / rel)
+        path_transform = _infer_path_transform(image_paths.tolist(), temp_extract_dir, logger)
 
-        exists_mask = df["full_path"].map(Path.exists)
-        stats["missing_images"] = int((~exists_mask).sum())
+        valid_indices: list[int] = []
+        valid_image_paths: list[Path] = []
+        missing_example: Path | None = None
+        invalid_example: str | None = None
+        missing_file_count = 0
+        invalid_path_count = 0
 
-        if stats["missing_images"]:
+        for idx, raw_rel_path in enumerate(image_paths.tolist()):
+            try:
+                normalized_rel_path = _normalize_relative_path(raw_rel_path)
+            except ValueError:
+                invalid_path_count += 1
+                if invalid_example is None:
+                    invalid_example = raw_rel_path
+                continue
+
+            transformed_rel_path = path_transform(normalized_rel_path)
+            candidate_paths: list[Path] = [transformed_rel_path]
+            if transformed_rel_path != normalized_rel_path:
+                candidate_paths.append(normalized_rel_path)
+
+            matched_rel_path: Path | None = None
+            for candidate_rel in candidate_paths:
+                if (temp_extract_dir / candidate_rel).exists():
+                    matched_rel_path = candidate_rel
+                    break
+
+            if matched_rel_path is None:
+                missing_file_count += 1
+                if missing_example is None:
+                    missing_example = temp_extract_dir / candidate_paths[0]
+                continue
+
+            valid_indices.append(idx)
+            valid_image_paths.append(matched_rel_path)
+
+        stats["missing_images"] = missing_file_count + invalid_path_count
+
+        if missing_file_count and missing_example is not None:
             logger.warning(
                 "%s images listed in parquet were not found on disk; first missing example: %s",
-                stats["missing_images"],
-                df.loc[~exists_mask, "full_path"].iloc[0],
+                f"{missing_file_count:,}",
+                missing_example,
             )
 
-        valid_image_paths: list[Path] = df.loc[exists_mask, "rel_path"].tolist()
+        if invalid_path_count and invalid_example is not None:
+            logger.warning(
+                "%s rows contained invalid image paths (first example: %s)",
+                f"{invalid_path_count:,}",
+                invalid_example,
+            )
 
         if not valid_image_paths:
             logger.error("No valid images found")
@@ -387,7 +469,7 @@ def process_intermediate_file(
 
         # Create output dataframe with embeddings
         # Only include rows with valid images
-        df_output = df.loc[exists_mask].drop(columns=["rel_path", "full_path"]).copy()
+        df_output = df.iloc[valid_indices].copy()
 
         # Convert embeddings to list of lists for parquet storage
         embeddings_list = [emb.tolist() for emb in embeddings]
