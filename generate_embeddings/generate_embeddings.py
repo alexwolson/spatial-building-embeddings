@@ -130,14 +130,6 @@ class ImageDataset(torch.utils.data.Dataset):
         rel_path = self.image_paths[idx]
         full_path = self.extract_dir / rel_path
 
-        # Try .jpg and .jpeg extensions if needed
-        if not full_path.exists():
-            for ext in [".jpg", ".jpeg"]:
-                alt_path = full_path.with_suffix(ext)
-                if alt_path.exists():
-                    full_path = alt_path
-                    break
-
         if not full_path.exists():
             raise FileNotFoundError(f"Image not found: {full_path}")
 
@@ -149,6 +141,8 @@ class ImageDataset(torch.utils.data.Dataset):
             image = self.transform(image)
 
         return image
+
+
 
 
 def _format_duration(seconds: float) -> str:
@@ -323,7 +317,7 @@ def process_intermediate_file(
     try:
         # Read intermediate parquet file
         logger.info("Reading intermediate parquet file...")
-        df = pd.read_parquet(parquet_path, engine="pyarrow")
+        df = pd.read_parquet(parquet_path, engine="pyarrow").copy()
         stats["total_entries"] = len(df)
         logger.info(f"Found {stats['total_entries']:,} entries")
 
@@ -352,62 +346,24 @@ def process_intermediate_file(
         model, transform = load_model_and_transforms(model_name)
 
         # Get image paths from dataframe
-        image_paths = df["image_path"].tolist()
-        
-        # Debug: Check first few paths from parquet
-        if image_paths:
-            logger.info(f"Sample parquet image path: {image_paths[0]}")
+        image_paths = df["image_path"].astype(str)
+        if not image_paths.empty:
+            logger.info(f"Sample parquet image path: {image_paths.iloc[0]}")
 
-        # Filter out missing images
-        # The paths in parquet are stored as relative paths like "0003/0003/{stem}.jpg"
-        # After tar extraction, files are at temp_extract_dir/0003/0003/{stem}.jpg
-        # So we can directly join them
-        valid_indices = []
-        valid_image_paths = []
-        for idx, rel_path in enumerate(image_paths):
-            # Normalize path - handle both string and Path, and normalize separators
-            if isinstance(rel_path, str):
-                # Normalize forward slashes (parquet stores with forward slashes)
-                rel_path = Path(rel_path.replace("\\", "/"))
-            else:
-                rel_path = Path(rel_path)
-            
-            # Construct full path - paths in parquet are relative to tar root
-            full_path = temp_extract_dir / rel_path
-            
-            # Try .jpg and .jpeg extensions
-            found = False
-            if full_path.exists():
-                found = True
-            else:
-                # Try alternative extensions
-                for ext in [".jpg", ".jpeg"]:
-                    alt_path = full_path.with_suffix(ext)
-                    if alt_path.exists():
-                        found = True
-                        full_path = alt_path
-                        break
-                
-                # If still not found, try searching for the filename (in case path structure differs)
-                if not found:
-                    filename = full_path.name
-                    # Search in the extracted directory for this filename
-                    found_files = list(temp_extract_dir.rglob(filename))
-                    if found_files:
-                        # Use the first match
-                        full_path = found_files[0]
-                        # Update rel_path to match what we actually found
-                        rel_path = full_path.relative_to(temp_extract_dir)
-                        found = True
-                        logger.debug(f"Found image at different path: {rel_path}")
+        df["rel_path"] = image_paths.map(Path)
+        df["full_path"] = df["rel_path"].map(lambda rel: temp_extract_dir / rel)
 
-            if found:
-                valid_indices.append(idx)
-                valid_image_paths.append(rel_path)
-            else:
-                stats["missing_images"] += 1
-                # Log both the relative path and the full path we tried
-                logger.warning(f"Image not found: {rel_path} (tried: {full_path})")
+        exists_mask = df["full_path"].map(Path.exists)
+        stats["missing_images"] = int((~exists_mask).sum())
+
+        if stats["missing_images"]:
+            logger.warning(
+                "%s images listed in parquet were not found on disk; first missing example: %s",
+                stats["missing_images"],
+                df.loc[~exists_mask, "full_path"].iloc[0],
+            )
+
+        valid_image_paths: list[Path] = df.loc[exists_mask, "rel_path"].tolist()
 
         if not valid_image_paths:
             logger.error("No valid images found")
@@ -431,7 +387,7 @@ def process_intermediate_file(
 
         # Create output dataframe with embeddings
         # Only include rows with valid images
-        df_output = df.iloc[valid_indices].copy()
+        df_output = df.loc[exists_mask].drop(columns=["rel_path", "full_path"]).copy()
 
         # Convert embeddings to list of lists for parquet storage
         embeddings_list = [emb.tolist() for emb in embeddings]
@@ -541,4 +497,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
