@@ -8,8 +8,10 @@ loads images, generates embeddings using timm, and writes output parquet file wi
 
 import argparse
 import logging
+import math
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import NamedTuple
 
@@ -149,6 +151,20 @@ class ImageDataset(torch.utils.data.Dataset):
         return image
 
 
+def _format_duration(seconds: float) -> str:
+    """Return human-readable duration string."""
+    if math.isnan(seconds) or math.isinf(seconds):
+        return "unknown"
+    seconds = max(0, int(seconds))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {seconds:02d}s"
+    if minutes:
+        return f"{minutes:d}m {seconds:02d}s"
+    return f"{seconds:d}s"
+
+
 def generate_embeddings_batch(
     images: list[Path],
     model: nn.Module,
@@ -186,6 +202,15 @@ def generate_embeddings_batch(
 
     all_embeddings = []
     num_processed = 0
+    total_images = len(images)
+    start_time = time.time()
+    last_log_time = start_time
+    log_interval_seconds = 300  # 5 minutes
+
+    # Log initial progress baseline
+    logger.info(
+        f"Progress: 0/{total_images:,} (0.0%) processed; ETA {_format_duration(float('nan'))}"
+    )
 
     with torch.no_grad():
         with Progress(
@@ -195,7 +220,7 @@ def generate_embeddings_batch(
             TaskProgressColumn(),
             refresh_per_second=1,
         ) as progress:
-            task = progress.add_task("Generating embeddings...", total=len(images))
+            task = progress.add_task("Generating embeddings...", total=total_images)
 
             for batch_images in dataloader:
                 # Move batch to GPU
@@ -216,9 +241,34 @@ def generate_embeddings_batch(
                 num_processed += len(batch_images)
                 progress.update(task, advance=len(batch_images))
 
+                now = time.time()
+                pct_complete = (num_processed / total_images) * 100
+                if (
+                    num_processed == total_images
+                    or now - last_log_time >= log_interval_seconds
+                ):
+                    elapsed = now - start_time
+                    rate = num_processed / elapsed if elapsed > 0 else 0.0
+                    remaining = (total_images - num_processed) / rate if rate > 0 else float("nan")
+                    logger.info(
+                        "Progress: %s/%s (%.1f%%) processed; elapsed %s; ETA %s",
+                        f"{num_processed:,}",
+                        f"{total_images:,}",
+                        pct_complete,
+                        _format_duration(elapsed),
+                        _format_duration(remaining),
+                    )
+                    last_log_time = now
+
     # Concatenate all embeddings
     all_embeddings = np.concatenate(all_embeddings, axis=0)
     logger.info(f"Generated {len(all_embeddings)} embeddings of dimension {all_embeddings.shape[1]}")
+    total_elapsed = time.time() - start_time
+    logger.info(
+        "Finished embedding generation in %s (avg %.1f images/sec)",
+        _format_duration(total_elapsed),
+        len(all_embeddings) / total_elapsed if total_elapsed > 0 else 0.0,
+    )
 
     return all_embeddings
 
