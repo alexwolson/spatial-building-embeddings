@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --account=<ACCOUNT>          # Required: Resource Allocation Project (set via submit script)
-#SBATCH --time=4:00:00                    # Default: 4 hours (model inference takes time)
-#SBATCH --mem-per-cpu=8G                   # Model + batch processing
-#SBATCH --cpus-per-task=4                  # Multiple CPUs for data loading
+#SBATCH --time=8:00:00                    # Default: 4 hours (model inference takes time)
+#SBATCH --mem-per-cpu=24G                   # Model + batch processing
+#SBATCH --cpus-per-task=8                  # Multiple CPUs for data loading
 #SBATCH --gres=gpu:1                       # GPU required for efficient inference
 #SBATCH --array=1-1%10                     # Default: 1 task (overridden by submit script)
 #SBATCH --job-name=generate_embeddings
