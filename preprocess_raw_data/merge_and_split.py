@@ -82,28 +82,71 @@ def read_intermediate_files(
     return combined_df
 
 
+def ensure_composite_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Ensure dataset-aware identifier columns exist (dataset_target_id, dataset_patch_id, dataset_target_patch_id).
+
+    Returns a copy of the DataFrame with the necessary columns.
+    """
+    required_columns = {"dataset_id", "target_id", "patch_id"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(
+            "Missing required columns for composite identifiers. "
+            f"Ensure phase 1 outputs include {', '.join(sorted(required_columns))}. "
+            f"Missing: {', '.join(sorted(missing))}"
+        )
+
+    enriched_df = df.copy()
+
+    dataset_str = enriched_df["dataset_id"].astype(int).astype(str).str.zfill(4)
+    target_str = enriched_df["target_id"].astype(int).astype(str)
+    patch_str = enriched_df["patch_id"].astype(int).astype(str)
+
+    if "dataset_target_id" not in enriched_df.columns:
+        enriched_df["dataset_target_id"] = dataset_str + "_" + target_str
+    if "dataset_patch_id" not in enriched_df.columns:
+        enriched_df["dataset_patch_id"] = dataset_str + "_" + patch_str
+    if "dataset_target_patch_id" not in enriched_df.columns:
+        enriched_df["dataset_target_patch_id"] = dataset_str + "_" + target_str + "_" + patch_str
+
+    return enriched_df
+
+
 def filter_singleton_targets(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
-    """Remove entries where target_id appears only once."""
+    """Remove entries where a dataset_target_id appears only once."""
     total_entries_before = len(df)
-    unique_targets_before = df["target_id"].nunique()
+    unique_targets_before = df["dataset_target_id"].nunique()
 
-    logger.info(f"Before filtering: {total_entries_before:,} entries from {unique_targets_before:,} unique target_ids")
+    logger.info(
+        "Before filtering: %s entries from %s unique dataset_target_ids",
+        f"{total_entries_before:,}",
+        f"{unique_targets_before:,}",
+    )
 
-    # Count occurrences per target_id
-    target_counts = df.groupby("target_id").size()
+    # Count occurrences per dataset_target_id
+    target_counts = df.groupby("dataset_target_id").size()
     singleton_targets = target_counts[target_counts == 1].index
 
-    logger.info(f"Found {len(singleton_targets):,} singleton target_ids")
+    logger.info(f"Found {len(singleton_targets):,} singleton dataset_target_ids")
     logger.info(f"Removing {len(singleton_targets):,} entries")
 
     # Filter out singletons
-    filtered_df = df[~df["target_id"].isin(singleton_targets)].copy()
+    filtered_df = df[~df["dataset_target_id"].isin(singleton_targets)].copy()
 
     total_entries_after = len(filtered_df)
-    unique_targets_after = filtered_df["target_id"].nunique()
+    unique_targets_after = filtered_df["dataset_target_id"].nunique()
 
-    logger.info(f"After filtering: {total_entries_after:,} entries from {unique_targets_after:,} unique target_ids")
-    logger.info(f"Removed {total_entries_before - total_entries_after:,} entries ({((total_entries_before - total_entries_after) / total_entries_before * 100):.1f}%)")
+    logger.info(
+        "After filtering: %s entries from %s unique dataset_target_ids",
+        f"{total_entries_after:,}",
+        f"{unique_targets_after:,}",
+    )
+    logger.info(
+        "Removed %s entries (%.1f%%)",
+        f"{total_entries_before - total_entries_after:,}",
+        ((total_entries_before - total_entries_after) / total_entries_before * 100) if total_entries_before else 0.0,
+    )
 
     return filtered_df
 
@@ -116,17 +159,16 @@ def create_splits(
     seed: int,
     logger: logging.Logger,
 ) -> pd.DataFrame:
-    """Assign split labels to entries based on target_id."""
-    # Get unique target_ids
-    unique_target_ids = df["target_id"].unique()
-    n_targets = len(unique_target_ids)
+    """Assign split labels to entries based on dataset_target_id."""
+    unique_target_keys = df["dataset_target_id"].unique()
+    n_targets = len(unique_target_keys)
 
-    logger.info(f"Splitting {n_targets:,} unique target_ids")
+    logger.info(f"Splitting {n_targets:,} unique dataset_target_ids")
     logger.info(f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}")
 
-    # Shuffle target_ids deterministically
+    # Shuffle composite identifiers deterministically
     rng = np.random.default_rng(seed)
-    shuffled_target_ids = rng.permutation(unique_target_ids)
+    shuffled_target_ids = rng.permutation(unique_target_keys)
 
     # Calculate split boundaries
     n_train = int(n_targets * train_ratio)
@@ -138,7 +180,7 @@ def create_splits(
     test_ids = set(shuffled_target_ids[n_train + n_val :])
 
     # Assign split labels
-    df["split"] = df["target_id"].map(
+    df["split"] = df["dataset_target_id"].map(
         lambda tid: "train" if tid in train_ids else ("val" if tid in val_ids else "test")
     )
 
@@ -230,8 +272,11 @@ def merge_and_split(
     ) as progress:
         df = read_intermediate_files(parquet_files, logger, progress)
 
+    # Ensure composite identifier columns are present
+    df = ensure_composite_identifiers(df)
+
     # Filter singleton targets
-    logger.info("Filtering singleton target_ids...")
+    logger.info("Filtering singleton dataset_target_ids...")
     df = filter_singleton_targets(df, logger)
 
     # Create splits
@@ -253,7 +298,7 @@ def merge_and_split(
     stats = {
         "total_intermediate_files": len(parquet_files),
         "total_rows_read": len(df),
-        "unique_target_ids": df["target_id"].nunique(),
+        "unique_dataset_target_ids": df["dataset_target_id"].nunique(),
         "train_entries": len(df[df["split"] == "train"]),
         "val_entries": len(df[df["split"] == "val"]),
         "test_entries": len(df[df["split"] == "test"]),
@@ -264,7 +309,7 @@ def merge_and_split(
     logger.info("=" * 60)
     logger.info(f"Total intermediate files processed: {stats['total_intermediate_files']}")
     logger.info(f"Total entries in final dataset: {stats['total_rows_read']:,}")
-    logger.info(f"Unique target_ids: {stats['unique_target_ids']:,}")
+    logger.info(f"Unique dataset_target_ids: {stats['unique_dataset_target_ids']:,}")
     logger.info(f"Train entries: {stats['train_entries']:,}")
     logger.info(f"Val entries: {stats['val_entries']:,}")
     logger.info(f"Test entries: {stats['test_entries']:,}")
@@ -329,7 +374,7 @@ def main() -> int:
         logger.info("Processing Summary:")
         logger.info(f"  Total intermediate files: {stats['total_intermediate_files']}")
         logger.info(f"  Total entries: {stats['total_rows_read']:,}")
-        logger.info(f"  Unique target_ids: {stats['unique_target_ids']:,}")
+        logger.info(f"  Unique dataset_target_ids: {stats['unique_dataset_target_ids']:,}")
         logger.info(f"  Train entries: {stats['train_entries']:,}")
         logger.info(f"  Val entries: {stats['val_entries']:,}")
         logger.info(f"  Test entries: {stats['test_entries']:,}")

@@ -252,13 +252,21 @@ def process_tar_file(
                 )
 
                 # Add valid entry
+                dataset_id = metadata.dataset_id
+                target_id = metadata.target_id
+                patch_id = metadata.patch_id
+
                 entries.append(
                     {
-                        "target_id": metadata.target_id,
-                        "patch_id": metadata.patch_id,
+                        "dataset_id": dataset_id,
+                        "target_id": target_id,
+                        "patch_id": patch_id,
                         "street_view_id": metadata.street_view_id,
                         "target_lat": metadata.target_lat,
                         "target_lon": metadata.target_lon,
+                        "dataset_target_id": f"{dataset_id:04d}_{target_id}",
+                        "dataset_patch_id": f"{dataset_id:04d}_{patch_id}",
+                        "dataset_target_patch_id": f"{dataset_id:04d}_{target_id}_{patch_id}",
                         "image_path": rel_image_path,
                         "tar_file": tar_path.name,
                     }
@@ -280,13 +288,16 @@ def process_tar_file(
 
         df = pd.DataFrame(entries)
         # Ensure correct dtypes (pandas should infer correctly, but be explicit for Parquet)
-        df = df.astype({
-            "target_id": "int64",
-            "patch_id": "int64",
-            "street_view_id": "int64",
-            "target_lat": "float64",
-            "target_lon": "float64",
-        })
+        df = df.astype(
+            {
+                "dataset_id": "int64",
+                "target_id": "int64",
+                "patch_id": "int64",
+                "street_view_id": "int64",
+                "target_lat": "float64",
+                "target_lon": "float64",
+            }
+        )
 
         # Write Parquet file
         output_dir.mkdir(parents=True, exist_ok=True)
