@@ -53,9 +53,9 @@ INTERMEDIATES_DIR=""
 RAW_DIR=""
 OUTPUT_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
-TIME="8:00:00"
+TIME="24:00:00"
 MAX_CONCURRENT=""  # Empty = unlimited (let SLURM scheduler decide based on resources)
-MEM_PER_CPU="24G"
+MEM_PER_CPU="48G"
 MODEL_NAME="vit_base_patch14_dinov2.lvd142m"
 BATCH_SIZE="128"
 RESUME=false
