@@ -110,14 +110,15 @@ fi
 # Step 9: Create config file and run processing script
 echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
-# Determine project root - use environment variable if set, otherwise auto-detect
-if [ -z "${PROJECT_ROOT:-}" ]; then
-    # Get the directory where this script is located
+# Determine project root - prefer explicit env, otherwise fall back to script location
+if [ -n "${PROJECT_ROOT:-}" ]; then
+    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
+else
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-else
-    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
 fi
+
+echo "Using project root: ${PROJECT_ROOT}"
 
 if [ ! -f "${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" ]; then
     echo "Error: generate_embeddings.py not found at ${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" >&2

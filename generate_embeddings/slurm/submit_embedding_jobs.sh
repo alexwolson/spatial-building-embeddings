@@ -63,7 +63,8 @@ VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
 # Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
-PROJECT_ROOT=""
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NO_VENV=false
 TEST_MODE=false
 
@@ -176,26 +177,7 @@ if [ -z "${ACCOUNT}" ]; then
     error_exit " --account is required (or set SLURM_ACCOUNT environment variable)" 1
 fi
 
-# Step 1: Detect project root
-if [ -z "${PROJECT_ROOT}" ]; then
-    # Try to find project root by looking for pyproject.toml
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    CURRENT_DIR="$(pwd)"
-    
-    # Check script directory and parent
-    for dir in "${SCRIPT_DIR}/../.." "${SCRIPT_DIR}/.." "${CURRENT_DIR}"; do
-        ABS_DIR="$(cd "${dir}" 2>/dev/null && pwd || echo "")"
-        if [ -n "${ABS_DIR}" ] && [ -f "${ABS_DIR}/pyproject.toml" ]; then
-            PROJECT_ROOT="${ABS_DIR}"
-            break
-        fi
-    done
-    
-    if [ -z "${PROJECT_ROOT}" ]; then
-        error_exit "Could not find project root (pyproject.toml). Use --project-root to specify." 5
-    fi
-fi
-
+# Step 1: Validate project root
 PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
 if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
     error_exit "Project root does not contain pyproject.toml: ${PROJECT_ROOT}" 5
@@ -311,7 +293,6 @@ info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${PROJECT_ROOT}/generate_embeddings/logs"
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
@@ -461,4 +442,3 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
 else
     error_exit "Job submission failed: ${SUBMIT_OUTPUT}" 6
 fi
-
