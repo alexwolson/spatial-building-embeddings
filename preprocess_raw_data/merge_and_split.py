@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Merge intermediate Parquet files, filter singleton TargetIDs, create train/val/test splits,
+Merge intermediate Parquet files, filter singleton building IDs, create train/val/test splits,
 and write final Parquet files.
 
-This script reads all intermediate Parquet files produced during tar preprocessing, removes singleton TargetIDs
-(which cannot form triplets), creates deterministic splits by TargetID, and writes final
-Parquet files for training.
+This script reads embedding Parquet files produced after tar preprocessing, removes singleton buildings
+(which cannot form triplets), creates deterministic splits by building, and writes final
+Parquet files for training. Resulting splits include embedding vectors and exclude raw image paths.
 """
 
 import argparse
@@ -53,12 +53,12 @@ def discover_intermediate_files(intermediates_dir: Path) -> list[Path]:
     return parquet_files
 
 
-def read_intermediate_files(
+def read_parquet_files(
     parquet_files: list[Path],
     logger: logging.Logger,
     progress: Progress,
 ) -> pd.DataFrame:
-    """Read all intermediate Parquet files and concatenate."""
+    """Read Parquet files and concatenate."""
     dfs = []
     task = progress.add_task("Reading intermediate files...", total=len(parquet_files))
 
@@ -75,16 +75,16 @@ def read_intermediate_files(
     if not dfs:
         raise ValueError("No valid intermediate files found")
 
-    logger.info(f"Read {len(dfs)} intermediate files, concatenating...")
+    logger.info(f"Read {len(dfs)} files, concatenating...")
     # Concatenate all DataFrames
     combined_df = pd.concat(dfs, ignore_index=True)
     logger.info(f"Total rows after concatenation: {len(combined_df):,}")
     return combined_df
 
 
-def ensure_composite_identifiers(df: pd.DataFrame) -> pd.DataFrame:
+def ensure_building_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Ensure dataset-aware identifier columns exist (dataset_target_id, dataset_patch_id, dataset_target_patch_id).
+    Ensure building-aware identifier columns exist (`building_id`, `streetview_image_id`).
 
     Returns a copy of the DataFrame with the necessary columns.
     """
@@ -103,42 +103,43 @@ def ensure_composite_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     target_str = enriched_df["target_id"].astype(int).astype(str)
     patch_str = enriched_df["patch_id"].astype(int).astype(str)
 
-    if "dataset_target_id" not in enriched_df.columns:
-        enriched_df["dataset_target_id"] = dataset_str + "_" + target_str
-    if "dataset_patch_id" not in enriched_df.columns:
-        enriched_df["dataset_patch_id"] = dataset_str + "_" + patch_str
-    if "dataset_target_patch_id" not in enriched_df.columns:
-        enriched_df["dataset_target_patch_id"] = dataset_str + "_" + target_str + "_" + patch_str
+    if "building_id" not in enriched_df.columns:
+        enriched_df["building_id"] = dataset_str + "_" + target_str
+    if "streetview_image_id" not in enriched_df.columns:
+        enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
 
     return enriched_df
 
 
-def filter_singleton_targets(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
-    """Remove entries where a dataset_target_id appears only once."""
+def filter_singleton_buildings(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
+    """Remove entries where a building_id appears only once."""
+    if "building_id" not in df.columns:
+        raise ValueError("Expected 'building_id' column to filter singleton buildings.")
+
     total_entries_before = len(df)
-    unique_targets_before = df["dataset_target_id"].nunique()
+    unique_targets_before = df["building_id"].nunique()
 
     logger.info(
-        "Before filtering: %s entries from %s unique dataset_target_ids",
+        "Before filtering: %s entries from %s unique building_ids",
         f"{total_entries_before:,}",
         f"{unique_targets_before:,}",
     )
 
-    # Count occurrences per dataset_target_id
-    target_counts = df.groupby("dataset_target_id").size()
+    # Count occurrences per building_id
+    target_counts = df.groupby("building_id").size()
     singleton_targets = target_counts[target_counts == 1].index
 
-    logger.info(f"Found {len(singleton_targets):,} singleton dataset_target_ids")
+    logger.info(f"Found {len(singleton_targets):,} singleton building_ids")
     logger.info(f"Removing {len(singleton_targets):,} entries")
 
     # Filter out singletons
-    filtered_df = df[~df["dataset_target_id"].isin(singleton_targets)].copy()
+    filtered_df = df[~df["building_id"].isin(singleton_targets)].copy()
 
     total_entries_after = len(filtered_df)
-    unique_targets_after = filtered_df["dataset_target_id"].nunique()
+    unique_targets_after = filtered_df["building_id"].nunique()
 
     logger.info(
-        "After filtering: %s entries from %s unique dataset_target_ids",
+        "After filtering: %s entries from %s unique building_ids",
         f"{total_entries_after:,}",
         f"{unique_targets_after:,}",
     )
@@ -159,11 +160,14 @@ def create_splits(
     seed: int,
     logger: logging.Logger,
 ) -> pd.DataFrame:
-    """Assign split labels to entries based on dataset_target_id."""
-    unique_target_keys = df["dataset_target_id"].unique()
+    """Assign split labels to entries based on building_id."""
+    if "building_id" not in df.columns:
+        raise ValueError("Expected 'building_id' column to create splits.")
+
+    unique_target_keys = df["building_id"].unique()
     n_targets = len(unique_target_keys)
 
-    logger.info(f"Splitting {n_targets:,} unique dataset_target_ids")
+    logger.info(f"Splitting {n_targets:,} unique building_ids")
     logger.info(f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}")
 
     # Shuffle composite identifiers deterministically
@@ -180,7 +184,7 @@ def create_splits(
     test_ids = set(shuffled_target_ids[n_train + n_val :])
 
     # Assign split labels
-    df["split"] = df["dataset_target_id"].map(
+    df["split"] = df["building_id"].map(
         lambda tid: "train" if tid in train_ids else ("val" if tid in val_ids else "test")
     )
 
@@ -215,7 +219,7 @@ def write_final_files(
         logger.info(f"Writing {split} split: {len(split_df):,} entries")
 
         # Drop split and tar_file columns (not needed in final files)
-        split_df = split_df.drop(columns=["split", "tar_file"])
+        split_df = split_df.drop(columns=["split", "tar_file", "image_path"], errors="ignore")
 
         # Write final file
         final_file = output_dir / f"{split}.parquet"
@@ -236,6 +240,7 @@ def write_final_files(
 
 def merge_and_split(
     intermediates_dir: Path,
+    embeddings_dir: Path,
     output_dir: Path,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
@@ -255,14 +260,32 @@ def merge_and_split(
 
     # Discover intermediate files
     logger.info(f"Discovering intermediate files in: {intermediates_dir}")
-    parquet_files = discover_intermediate_files(intermediates_dir)
-    logger.info(f"Found {len(parquet_files)} intermediate Parquet files")
+    intermediate_files = discover_intermediate_files(intermediates_dir)
+    logger.info(f"Found {len(intermediate_files)} intermediate Parquet files")
 
-    if not parquet_files:
+    if not intermediate_files:
         raise ValueError(f"No Parquet files found in {intermediates_dir}")
 
-    # Read intermediate files
-    logger.info("Reading intermediate files...")
+    logger.info(f"Discovering embedding files in: {embeddings_dir}")
+    embedding_files = sorted(embeddings_dir.glob("*_embeddings.parquet"))
+    logger.info(f"Found {len(embedding_files)} embedding Parquet files")
+
+    if not embedding_files:
+        raise ValueError(f"No embedding Parquet files found in {embeddings_dir}")
+
+    # Warn if counts differ
+    intermediate_stems = {path.stem for path in intermediate_files}
+    embedding_stems = {path.stem.removesuffix("_embeddings") for path in embedding_files}
+    missing_embeddings = sorted(intermediate_stems - embedding_stems)
+    if missing_embeddings:
+        logger.warning(
+            "Missing embeddings for %d intermediate files (e.g., %s)",
+            len(missing_embeddings),
+            ", ".join(missing_embeddings[:3]),
+        )
+
+    # Read embedding files
+    logger.info("Reading embedding files...")
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -270,14 +293,20 @@ def merge_and_split(
         TaskProgressColumn(),
         refresh_per_second=1,
     ) as progress:
-        df = read_intermediate_files(parquet_files, logger, progress)
+        df = read_parquet_files(embedding_files, logger, progress)
+
+    if "embedding" not in df.columns:
+        raise ValueError(
+            "Embedding column not found in combined dataframe. "
+            "Ensure generate_embeddings.py outputs include an 'embedding' column."
+        )
 
     # Ensure composite identifier columns are present
-    df = ensure_composite_identifiers(df)
+    df = ensure_building_identifiers(df)
 
     # Filter singleton targets
-    logger.info("Filtering singleton dataset_target_ids...")
-    df = filter_singleton_targets(df, logger)
+    logger.info("Filtering singleton building_ids...")
+    df = filter_singleton_buildings(df, logger)
 
     # Create splits
     logger.info("Creating train/val/test splits...")
@@ -296,9 +325,10 @@ def merge_and_split(
 
     # Calculate statistics
     stats = {
-        "total_intermediate_files": len(parquet_files),
+        "total_intermediate_files": len(intermediate_files),
+        "total_embedding_files": len(embedding_files),
         "total_rows_read": len(df),
-        "unique_dataset_target_ids": df["dataset_target_id"].nunique(),
+        "unique_building_ids": df["building_id"].nunique(),
         "train_entries": len(df[df["split"] == "train"]),
         "val_entries": len(df[df["split"] == "val"]),
         "test_entries": len(df[df["split"] == "test"]),
@@ -309,7 +339,7 @@ def merge_and_split(
     logger.info("=" * 60)
     logger.info(f"Total intermediate files processed: {stats['total_intermediate_files']}")
     logger.info(f"Total entries in final dataset: {stats['total_rows_read']:,}")
-    logger.info(f"Unique dataset_target_ids: {stats['unique_dataset_target_ids']:,}")
+    logger.info(f"Unique building_ids: {stats['unique_building_ids']:,}")
     logger.info(f"Train entries: {stats['train_entries']:,}")
     logger.info(f"Val entries: {stats['val_entries']:,}")
     logger.info(f"Test entries: {stats['test_entries']:,}")
@@ -361,6 +391,7 @@ def main() -> int:
         # Run merge and split
         stats = merge_and_split(
             intermediates_dir=config.intermediates_dir,
+            embeddings_dir=config.embeddings_dir,
             output_dir=config.output_dir,
             train_ratio=config.train_ratio,
             val_ratio=config.val_ratio,
@@ -374,7 +405,7 @@ def main() -> int:
         logger.info("Processing Summary:")
         logger.info(f"  Total intermediate files: {stats['total_intermediate_files']}")
         logger.info(f"  Total entries: {stats['total_rows_read']:,}")
-        logger.info(f"  Unique dataset_target_ids: {stats['unique_dataset_target_ids']:,}")
+        logger.info(f"  Unique building_ids: {stats['unique_building_ids']:,}")
         logger.info(f"  Train entries: {stats['train_entries']:,}")
         logger.info(f"  Val entries: {stats['val_entries']:,}")
         logger.info(f"  Test entries: {stats['test_entries']:,}")

@@ -57,9 +57,8 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
     target_ids = set()
     patch_ids = set()
     dataset_ids = set()
-    dataset_target_ids = set()
-    dataset_patch_ids = set()
-    dataset_target_patch_ids = set()
+    building_ids = set()
+    streetview_image_ids = set()
 
     for parquet_path in files:
         logger.debug("Processing %s", parquet_path)
@@ -74,7 +73,7 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
         if dataset_col:
             required_columns.add(dataset_col)
         optional_columns = [
-            col for col in ("dataset_target_id", "dataset_patch_id", "dataset_target_patch_id") if col in schema_names
+            col for col in ("building_id", "streetview_image_id") if col in schema_names
         ]
         df = pd.read_parquet(parquet_path, columns=list(required_columns | set(optional_columns)))
 
@@ -99,38 +98,27 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
 
         valid_dt = df.dropna(subset=["_dataset_id", "_target_id"])[["_dataset_id", "_target_id"]].astype(int)
         if not valid_dt.empty:
-            dataset_target_ids.update(
+            building_ids.update(
                 f"{dataset:04d}_{target}" for dataset, target in valid_dt.to_numpy()
             )
 
         valid_dp = df.dropna(subset=["_dataset_id", "_patch_id"])[["_dataset_id", "_patch_id"]].astype(int)
         if not valid_dp.empty:
-            dataset_patch_ids.update(
+            streetview_image_ids.update(
                 f"{dataset:04d}_{patch}" for dataset, patch in valid_dp.to_numpy()
             )
 
-        valid_dtp = df.dropna(subset=["_dataset_id", "_target_id", "_patch_id"])[
-            ["_dataset_id", "_target_id", "_patch_id"]
-        ].astype(int)
-        if not valid_dtp.empty:
-            dataset_target_patch_ids.update(
-                f"{dataset:04d}_{target}_{patch}" for dataset, target, patch in valid_dtp.to_numpy()
-            )
-
-        if "dataset_target_id" in df.columns:
-            dataset_target_ids.update(df["dataset_target_id"].dropna().astype(str).unique())
-        if "dataset_patch_id" in df.columns:
-            dataset_patch_ids.update(df["dataset_patch_id"].dropna().astype(str).unique())
-        if "dataset_target_patch_id" in df.columns:
-            dataset_target_patch_ids.update(df["dataset_target_patch_id"].dropna().astype(str).unique())
+        if "building_id" in df.columns:
+            building_ids.update(df["building_id"].dropna().astype(str).unique())
+        if "streetview_image_id" in df.columns:
+            streetview_image_ids.update(df["streetview_image_id"].dropna().astype(str).unique())
 
     return {
         "dataset_id": len(dataset_ids),
         "target_id": len(target_ids),
         "patch_id": len(patch_ids),
-        "dataset_target_id": len(dataset_target_ids),
-        "dataset_patch_id": len(dataset_patch_ids),
-        "dataset_target_patch_id": len(dataset_target_patch_ids),
+        "building_id": len(building_ids),
+        "streetview_image_id": len(streetview_image_ids),
     }
 
 
@@ -149,9 +137,8 @@ def main() -> None:
     print(f"Unique datasetIDs: {counts['dataset_id']}")
     print(f"Unique targetIDs (global): {counts['target_id']}")
     print(f"Unique patchIDs (global): {counts['patch_id']}")
-    print(f"Unique dataset-target IDs: {counts['dataset_target_id']}")
-    print(f"Unique dataset-patch IDs: {counts['dataset_patch_id']}")
-    print(f"Unique dataset-target-patch IDs: {counts['dataset_target_patch_id']}")
+    print(f"Unique building IDs: {counts['building_id']}")
+    print(f"Unique streetview image IDs: {counts['streetview_image_id']}")
 
 
 if __name__ == "__main__":

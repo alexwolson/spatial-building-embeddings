@@ -41,6 +41,7 @@ class MergeAndSplitConfig(BaseSettings):
 
     intermediates_dir: Path = Field(..., description="Directory containing intermediate Parquet files")
     output_dir: Path = Field(..., description="Directory for final output Parquet files")
+    embeddings_dir: Path = Field(..., description="Directory containing per-tar embedding Parquet files")
     train_ratio: float = Field(0.7, ge=0.0, le=1.0, description="Training set ratio")
     val_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Validation set ratio")
     test_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Test set ratio")

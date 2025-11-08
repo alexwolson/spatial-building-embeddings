@@ -10,6 +10,7 @@
 # Options:
 #   --intermediates-dir <DIR>  Directory containing intermediate Parquet files (required)
 #   --output-dir <DIR>         Directory for final output Parquet files (required)
+#   --embeddings-dir <DIR>     Directory containing per-tar embedding Parquet files (required)
 #   --account <ACCOUNT>        SLURM account name (required, or use SLURM_ACCOUNT env var)
 #   --time <TIME>              Time limit (default: 12:00:00)
 #   --mem <MEM>                Memory requirement (default: 100G)
@@ -52,6 +53,7 @@ set -euo pipefail
 # Default values
 INTERMEDIATES_DIR=""
 OUTPUT_DIR=""
+EMBEDDINGS_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="12:00:00"
 MEM="100G"
@@ -108,6 +110,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --account)
             ACCOUNT="$2"
+            shift 2
+            ;;
+        --embeddings-dir)
+            EMBEDDINGS_DIR="$2"
             shift 2
             ;;
         --time)
@@ -180,6 +186,10 @@ if [ -z "${OUTPUT_DIR}" ]; then
     error_exit "--output-dir is required" 1
 fi
 
+if [ -z "${EMBEDDINGS_DIR}" ]; then
+    error_exit "--embeddings-dir is required" 1
+fi
+
 if [ -z "${ACCOUNT}" ]; then
     error_exit "--account is required (or set SLURM_ACCOUNT environment variable)" 1
 fi
@@ -230,6 +240,20 @@ fi
 
 if [ ! -w "${OUTPUT_DIR}" ]; then
     error_exit "Output directory is not writable: ${OUTPUT_DIR}" 2
+fi
+
+if [ ! -d "${EMBEDDINGS_DIR}" ]; then
+    error_exit "Embeddings directory not found: ${EMBEDDINGS_DIR}" 2
+fi
+
+EMBEDDING_COUNT=$(find "${EMBEDDINGS_DIR}" -name "*_embeddings.parquet" -type f | wc -l)
+if [ "${EMBEDDING_COUNT}" -eq 0 ]; then
+    error_exit "No embedding Parquet files found in ${EMBEDDINGS_DIR}" 2
+fi
+
+# Warn if embedding count differs from intermediates
+if [ "${EMBEDDING_COUNT}" -ne "${PARQUET_COUNT}" ]; then
+    warning "Found ${EMBEDDING_COUNT} embedding files but ${PARQUET_COUNT} intermediate files"
 fi
 
 # Step 3: Setup Python environment (similar to tar preprocessing submission script)
@@ -294,12 +318,14 @@ mkdir -p "${LOG_DIR}"
 
 info "Output directory: ${OUTPUT_DIR}"
 info "Log directory: ${LOG_DIR}"
+info "Embeddings directory: ${EMBEDDINGS_DIR}"
 
 # Step 5: Submit job
 SBATCH_SCRIPT="${SCRIPT_DIR}/merge_and_split.sbatch"
 
 # Build export string - only include VENV_PATH and ARROW_MODULE if they're set
 EXPORT_VARS="ALL,INTERMEDIATES_DIR=${INTERMEDIATES_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},TRAIN_RATIO=${TRAIN_RATIO},VAL_RATIO=${VAL_RATIO},TEST_RATIO=${TEST_RATIO},SEED=${SEED}"
+EXPORT_VARS="${EXPORT_VARS},EMBEDDINGS_DIR=${EMBEDDINGS_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi

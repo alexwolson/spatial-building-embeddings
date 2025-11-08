@@ -13,6 +13,8 @@
 # Environment variables expected:
 #   INTERMEDIATES_DIR: Directory containing intermediate Parquet files
 #   OUTPUT_DIR: Directory for final output Parquet files
+#   EMBEDDINGS_DIR: Directory containing per-tar embedding Parquet files
+#   PROJECT_ROOT: Path to project root directory (optional, will auto-detect if not set)
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
 #   PYTHON_MODULE: Python module to load (e.g., python/3.12)
 #   ARROW_MODULE: Arrow module to load for PyArrow (optional, e.g., arrow/17.0.0)
@@ -73,8 +75,14 @@ if [ -z "${OUTPUT_DIR:-}" ]; then
     exit 1
 fi
 
+if [ -z "${EMBEDDINGS_DIR:-}" ]; then
+    echo "Error: EMBEDDINGS_DIR not set" >&2
+    exit 1
+fi
+
 echo "Intermediates directory: ${INTERMEDIATES_DIR}"
 echo "Output directory: ${OUTPUT_DIR}"
+echo "Embeddings directory: ${EMBEDDINGS_DIR}"
 
 # Step 6: Check if intermediates directory exists and contains files
 if [ ! -d "${INTERMEDIATES_DIR}" ]; then
@@ -90,7 +98,35 @@ fi
 
 echo "Found ${PARQUET_COUNT} intermediate Parquet files"
 
-# Step 7: Set default values for optional parameters
+EMBEDDING_COUNT=$(find "${EMBEDDINGS_DIR}" -name "*_embeddings.parquet" -type f | wc -l)
+if [ "${EMBEDDING_COUNT}" -eq 0 ]; then
+    echo "Error: No embedding Parquet files found in ${EMBEDDINGS_DIR}" >&2
+    exit 1
+fi
+
+if [ "${EMBEDDING_COUNT}" -ne "${PARQUET_COUNT}" ]; then
+    echo "Warning: Found ${EMBEDDING_COUNT} embedding files but ${PARQUET_COUNT} intermediate files"
+fi
+
+# Step 7: Resolve project root and configure Python path
+if [ -n "${PROJECT_ROOT:-}" ]; then
+    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
+elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/pyproject.toml" ]; then
+    PROJECT_ROOT="$(cd "${SLURM_SUBMIT_DIR}" && pwd)"
+else
+    SCRIPT_DIR_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "${SCRIPT_DIR_SOURCE}/../.." && pwd)"
+fi
+
+if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" ]; then
+    echo "Error: merge_and_split.py not found at ${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" >&2
+    exit 1
+fi
+
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+echo "Project root: ${PROJECT_ROOT}"
+
+# Step 8: Set default values for optional parameters
 TRAIN_RATIO="${TRAIN_RATIO:-0.7}"
 VAL_RATIO="${VAL_RATIO:-0.15}"
 TEST_RATIO="${TEST_RATIO:-0.15}"
@@ -99,12 +135,8 @@ SEED="${SEED:-42}"
 echo "Split ratios: train=${TRAIN_RATIO}, val=${VAL_RATIO}, test=${TEST_RATIO}"
 echo "Random seed: ${SEED}"
 
-# Step 8: Create config file and run merge and split script
+# Step 9: Create config file and run merge and split script
 echo "Starting merge and split at $(date '+%Y-%m-%d %H:%M:%S')"
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # Create log file path
 LOG_FILE="${SLURM_SUBMIT_DIR:-.}/merge_${SLURM_JOB_ID}.log"
@@ -123,6 +155,7 @@ cat > "${CONFIG_FILE}" << EOF
 [merge_and_split]
 intermediates_dir = "${INTERMEDIATES_DIR}"
 output_dir = "${OUTPUT_DIR}"
+embeddings_dir = "${EMBEDDINGS_DIR}"
 train_ratio = ${TRAIN_RATIO}
 val_ratio = ${VAL_RATIO}
 test_ratio = ${TEST_RATIO}
@@ -135,7 +168,7 @@ python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
 
 EXIT_CODE=$?
 
-# Step 9: Error handling
+# Step 10: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "Error: Merge and split failed with exit code ${EXIT_CODE}" >&2
     echo "End time: $(date '+%Y-%m-%d %H:%M:%S')"
