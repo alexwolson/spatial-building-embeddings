@@ -58,7 +58,7 @@ d {DatasetID} {TargetID} {PatchID} {StreetViewID} {target_lat} {target_lon} {tar
 2. **Target Point (3 values):**
    - `target_lat`: Latitude of the target building point (degrees)
    - `target_lon`: Longitude of the target building point (degrees)
-   - `target_height`: Height/elevation of the target point (meters)
+   - `target_height`: Height/elevation of the target point (metres)
 
 3. **Surface Normal (3 values):**
    - `normal_x`, `normal_y`, `normal_z`: 3D surface normal vector components
@@ -66,10 +66,10 @@ d {DatasetID} {TargetID} {PatchID} {StreetViewID} {target_lat} {target_lon} {tar
 4. **Street View Location (3 values):**
    - `street_lat`: Latitude of the camera/street view location (degrees)
    - `street_lon`: Longitude of the camera/street view location (degrees)
-   - `street_height`: Height/elevation of the camera location (meters)
+   - `street_height`: Height/elevation of the camera location (metres)
 
 5. **Camera Parameters (4 values):**
-   - `distance`: Distance from camera to target (meters)
+   - `distance`: Distance from camera to target (metres)
    - `heading`: Camera heading/yaw angle (degrees)
    - `pitch`: Camera pitch angle (degrees)
    - `roll`: Camera roll angle (degrees)

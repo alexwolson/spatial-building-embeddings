@@ -111,6 +111,83 @@ def ensure_building_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     return enriched_df
 
 
+def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path | None = None) -> pd.DataFrame:
+    """
+    Guarantee that a `dataset_id` column exists with integer dtype.
+
+    Attempts to back-fill missing values using other identifier columns typically
+    present in intermediate or embedding parquet outputs.
+    """
+    working_df = df.copy()
+
+    def _coerce_numeric(series: pd.Series, label: str) -> pd.Series:
+        numeric = pd.to_numeric(series, errors="coerce")
+        return pd.Series(pd.array(numeric, dtype="Int64"), index=working_df.index, name=label)
+
+    # Start with existing dataset_id values if present
+    if "dataset_id" in working_df.columns:
+        dataset_series = _coerce_numeric(working_df["dataset_id"], "dataset_id")
+    else:
+        dataset_series = pd.Series(pd.array([pd.NA] * len(working_df), dtype="Int64"), index=working_df.index)
+
+    # Helper to merge inferred values into dataset_series
+    def _fill_from(label: str, values: pd.Series) -> None:
+        nonlocal dataset_series
+        try:
+            inferred = _coerce_numeric(values, label)
+        except Exception:
+            return
+        missing = dataset_series.isna()
+        if not missing.any():
+            return
+        fill_mask = missing & inferred.notna()
+        if fill_mask.any():
+            dataset_series = dataset_series.where(~fill_mask, inferred)
+            logger.debug(
+                "Filled dataset_id for %d rows using %s",
+                int(fill_mask.sum()),
+                label,
+            )
+
+    if "building_id" in working_df.columns:
+        prefixes = working_df["building_id"].astype(str).str.split("_", n=1).str[0]
+        _fill_from("building_id", prefixes)
+
+    if dataset_series.isna().any() and "streetview_image_id" in working_df.columns:
+        prefixes = working_df["streetview_image_id"].astype(str).str.split("_", n=1).str[0]
+        _fill_from("streetview_image_id", prefixes)
+
+    if dataset_series.isna().any() and "image_path" in working_df.columns:
+        prefixes = working_df["image_path"].astype(str).str.split("/", n=1).str[0]
+        _fill_from("image_path", prefixes)
+
+    if dataset_series.isna().any() and "tar_file" in working_df.columns:
+        stems = working_df["tar_file"].astype(str).str.removesuffix(".tar")
+        _fill_from("tar_file", stems)
+
+    if dataset_series.isna().any():
+        sample_missing = min(5, int(dataset_series.isna().sum()))
+        context_columns = [
+            col for col in ["building_id", "streetview_image_id", "image_path", "tar_file"] if col in working_df.columns
+        ]
+        context = (
+            working_df.loc[dataset_series.isna(), context_columns].head(sample_missing)
+            if context_columns
+            else pd.DataFrame(index=working_df.index)
+        )
+        raise ValueError(
+            "Unable to infer dataset_id for all rows. "
+            "Expected at least one of building_id, streetview_image_id, image_path, or tar_file "
+            "to contain dataset prefixes. "
+            f"Problematic sample:\n{context.to_string(index=False)}"
+        )
+
+    working_df["dataset_id"] = dataset_series.astype("int64")
+    if source:
+        logger.debug("Ensured dataset_id for %s", source)
+    return working_df
+
+
 def filter_singleton_buildings(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
     """Remove entries where a building_id appears only once."""
     if "building_id" not in df.columns:
@@ -301,7 +378,8 @@ def merge_and_split(
             "Ensure generate_embeddings.py outputs include an 'embedding' column."
         )
 
-    # Ensure composite identifier columns are present
+    # Ensure dataset identifiers exist before composing building-aware identifiers
+    df = ensure_dataset_id(df, logger)
     df = ensure_building_identifiers(df)
 
     # Filter singleton targets
