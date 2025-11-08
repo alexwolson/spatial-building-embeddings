@@ -336,7 +336,7 @@ def process_intermediate_file(
     """
     logger = setup_logging(log_file)
     logger.info("=" * 60)
-    logger.info("Phase 3: Generate Embeddings")
+    logger.info("Embedding generation: starting")
     logger.info("=" * 60)
     logger.info(f"Processing parquet file: {parquet_path}")
     logger.info(f"Tar file: {tar_path}")

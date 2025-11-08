@@ -14,7 +14,7 @@
 #   --time <TIME>              Time limit (default: 12:00:00)
 #   --mem <MEM>                Memory requirement (default: 100G)
 #   --cpus <N>                 Number of CPUs (default: 8)
-#   --dependency <JOB_ID>      Job ID(s) to wait for (optional, for Phase 1 completion)
+#   --dependency <JOB_ID>      Job ID(s) to wait for (optional, for tar preprocessing completion)
 #   --seed <N>                 Random seed for splits (default: 42)
 #   --train-ratio <RATIO>      Training set ratio (default: 0.7)
 #   --val-ratio <RATIO>        Validation set ratio (default: 0.15)
@@ -30,7 +30,7 @@
 #   # Basic usage with automatic venv creation
 #   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final --account <ACCOUNT>
 #
-#   # Wait for Phase 1 jobs to complete
+#   # Wait for tar preprocessing jobs to complete
 #   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final \
 #       --account <ACCOUNT> --dependency 12345
 #
@@ -232,7 +232,7 @@ if [ ! -w "${OUTPUT_DIR}" ]; then
     error_exit "Output directory is not writable: ${OUTPUT_DIR}" 2
 fi
 
-# Step 3: Setup Python environment (similar to Phase 1 submission script)
+# Step 3: Setup Python environment (similar to tar preprocessing submission script)
 if [ "${NO_VENV}" = false ]; then
     # Load Arrow module if specified (needed for PyArrow)
     if [ -n "${ARROW_MODULE:-}" ]; then

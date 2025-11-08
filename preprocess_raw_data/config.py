@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProcessTarConfig(BaseSettings):
-    """Configuration for Phase 1: processing a single tar file."""
+    """Configuration for tar preprocessing (per-tar parquet extraction)."""
 
     model_config = SettingsConfigDict(
         env_prefix="PROCESS_TAR_",
@@ -31,7 +31,7 @@ class ProcessTarConfig(BaseSettings):
 
 
 class MergeAndSplitConfig(BaseSettings):
-    """Configuration for Phase 2: merging and splitting intermediate files."""
+    """Configuration for dataset assembly (merging and splitting intermediate files)."""
 
     model_config = SettingsConfigDict(
         env_prefix="MERGE_",

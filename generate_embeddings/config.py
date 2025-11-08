@@ -1,5 +1,5 @@
 """
-Configuration management for Phase 3: embedding generation.
+Configuration management for embedding generation.
 
 Supports loading configuration from:
 - Environment variables (with prefixes)
@@ -16,7 +16,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class GenerateEmbeddingsConfig(BaseSettings):
-    """Configuration for Phase 3: embedding generation."""
+    """Configuration for embedding generation."""
 
     model_config = SettingsConfigDict(
         env_prefix="GENERATE_EMBEDDINGS_",

@@ -1,2 +1,2 @@
-"""Phase 3: Embedding generation module."""
+"""Embedding generation module."""
 

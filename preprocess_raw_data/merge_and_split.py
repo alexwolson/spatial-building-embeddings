@@ -3,7 +3,7 @@
 Merge intermediate Parquet files, filter singleton TargetIDs, create train/val/test splits,
 and write final Parquet files.
 
-This script reads all intermediate Parquet files from Phase 1, removes singleton TargetIDs
+This script reads all intermediate Parquet files produced during tar preprocessing, removes singleton TargetIDs
 (which cannot form triplets), creates deterministic splits by TargetID, and writes final
 Parquet files for training.
 """
@@ -93,7 +93,7 @@ def ensure_composite_identifiers(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise ValueError(
             "Missing required columns for composite identifiers. "
-            f"Ensure phase 1 outputs include {', '.join(sorted(required_columns))}. "
+            f"Ensure tar preprocessing outputs include {', '.join(sorted(required_columns))}. "
             f"Missing: {', '.join(sorted(missing))}"
         )
 
@@ -250,7 +250,7 @@ def merge_and_split(
     """
     logger = setup_logging(log_file)
     logger.info("=" * 60)
-    logger.info("Phase 2: Merge and Split")
+    logger.info("Dataset assembly: merge and split intermediates")
     logger.info("=" * 60)
 
     # Discover intermediate files
@@ -305,7 +305,7 @@ def merge_and_split(
     }
 
     logger.info("=" * 60)
-    logger.info("Phase 2 Complete")
+    logger.info("Dataset assembly complete")
     logger.info("=" * 60)
     logger.info(f"Total intermediate files processed: {stats['total_intermediate_files']}")
     logger.info(f"Total entries in final dataset: {stats['total_rows_read']:,}")
