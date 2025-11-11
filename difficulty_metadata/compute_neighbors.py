@@ -289,26 +289,11 @@ def write_parquet(
     """Write the difficulty metadata parquet file."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    neighbor_building_ids = buildings.building_ids[neighbour_indices]
     dtype_np = np.float32 if distance_dtype == "float32" else np.float64
     neighbor_distances = neighbour_distances.astype(dtype_np, copy=False)
-
-    list_length = neighbour_indices.shape[1]
     total_rows = neighbour_indices.shape[0]
 
-    offsets = pa.array(
-        np.arange(0, (total_rows + 1) * list_length, list_length, dtype=np.int32),
-        type=pa.int32(),
-    )
-    neighbor_id_values = pa.array(neighbor_building_ids.reshape(-1), type=pa.string())
-    neighbor_ids_list = pa.ListArray.from_arrays(offsets, neighbor_id_values)
-
     distance_value_type = pa.float32() if distance_dtype == "float32" else pa.float64()
-    distance_values = pa.array(neighbor_distances.reshape(-1), type=distance_value_type)
-    neighbor_distance_list = pa.ListArray.from_arrays(offsets, distance_values)
-
-    band_values = pa.array(bands.reshape(-1), type=pa.int16())
-    neighbor_band_list = pa.ListArray.from_arrays(offsets, band_values)
 
     schema = pa.schema(
         [
@@ -325,12 +310,7 @@ def write_parquet(
 
     encoded_metadata = {key: value.encode("utf-8") for key, value in metadata.items()}
 
-    with pq.ParquetWriter(
-        output_path,
-        schema=schema,
-        compression="snappy",
-        metadata=encoded_metadata,
-    ) as writer:
+    with pq.ParquetWriter(output_path, schema=schema, compression="snappy", metadata=encoded_metadata) as writer:
         for start in range(0, total_rows, row_group_size):
             end = min(start + row_group_size, total_rows)
 
@@ -338,52 +318,15 @@ def write_parquet(
             batch_neighbor_distances = neighbour_distances[start:end].astype(dtype_np, copy=False)
             batch_bands = bands[start:end]
 
-            batch_offsets = pa.array(
-                np.arange(
-                    0,
-                    (batch_neighbor_ids.shape[0] + 1) * list_length,
-                    list_length,
-                    dtype=np.int32,
-                ),
-                type=pa.int32(),
-            )
-
-            batch_neighbor_id_values = pa.array(
-                batch_neighbor_ids.reshape(-1),
-                type=pa.string(),
-            )
-            batch_neighbor_ids_list = pa.ListArray.from_arrays(
-                batch_offsets,
-                batch_neighbor_id_values,
-            )
-
-            batch_distance_values = pa.array(
-                batch_neighbor_distances.reshape(-1),
-                type=distance_value_type,
-            )
-            batch_neighbor_distance_list = pa.ListArray.from_arrays(
-                batch_offsets,
-                batch_distance_values,
-            )
-
-            batch_band_values = pa.array(
-                batch_bands.reshape(-1),
-                type=pa.int16(),
-            )
-            batch_neighbor_band_list = pa.ListArray.from_arrays(
-                batch_offsets,
-                batch_band_values,
-            )
-
             arrays = [
                 pa.array(buildings.building_ids[start:end]),
                 pa.array(buildings.dataset_ids[start:end].astype(np.int32, copy=False)),
                 pa.array(buildings.target_ids[start:end]),
                 pa.array(buildings.lat_degrees[start:end]),
                 pa.array(buildings.lon_degrees[start:end]),
-                batch_neighbor_ids_list,
-                batch_neighbor_distance_list,
-                batch_neighbor_band_list,
+                pa.array(batch_neighbor_ids.tolist(), type=pa.list_(pa.string())),
+                pa.array(batch_neighbor_distances.tolist(), type=pa.list_(distance_value_type)),
+                pa.array(batch_bands.tolist(), type=pa.list_(pa.int16())),
             ]
 
             table = pa.Table.from_arrays(arrays, schema=schema)
