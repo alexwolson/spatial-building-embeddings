@@ -325,19 +325,69 @@ def write_parquet(
 
     encoded_metadata = {key: value.encode("utf-8") for key, value in metadata.items()}
 
-    arrays = [
-        pa.array(buildings.building_ids),
-        pa.array(buildings.dataset_ids.astype(np.int32, copy=False)),
-        pa.array(buildings.target_ids),
-        pa.array(buildings.lat_degrees),
-        pa.array(buildings.lon_degrees),
-        neighbor_ids_list,
-        neighbor_distance_list,
-        neighbor_band_list,
-    ]
+    with pq.ParquetWriter(
+        output_path,
+        schema=schema,
+        compression="snappy",
+        metadata=encoded_metadata,
+    ) as writer:
+        for start in range(0, total_rows, row_group_size):
+            end = min(start + row_group_size, total_rows)
 
-    table = pa.Table.from_arrays(arrays, schema=schema).replace_schema_metadata(encoded_metadata)
-    pq.write_table(table, output_path, row_group_size=row_group_size, compression="snappy")
+            batch_neighbor_ids = buildings.building_ids[neighbour_indices[start:end]]
+            batch_neighbor_distances = neighbour_distances[start:end].astype(dtype_np, copy=False)
+            batch_bands = bands[start:end]
+
+            batch_offsets = pa.array(
+                np.arange(
+                    0,
+                    (batch_neighbor_ids.shape[0] + 1) * list_length,
+                    list_length,
+                    dtype=np.int32,
+                ),
+                type=pa.int32(),
+            )
+
+            batch_neighbor_id_values = pa.array(
+                batch_neighbor_ids.reshape(-1),
+                type=pa.string(),
+            )
+            batch_neighbor_ids_list = pa.ListArray.from_arrays(
+                batch_offsets,
+                batch_neighbor_id_values,
+            )
+
+            batch_distance_values = pa.array(
+                batch_neighbor_distances.reshape(-1),
+                type=distance_value_type,
+            )
+            batch_neighbor_distance_list = pa.ListArray.from_arrays(
+                batch_offsets,
+                batch_distance_values,
+            )
+
+            batch_band_values = pa.array(
+                batch_bands.reshape(-1),
+                type=pa.int16(),
+            )
+            batch_neighbor_band_list = pa.ListArray.from_arrays(
+                batch_offsets,
+                batch_band_values,
+            )
+
+            arrays = [
+                pa.array(buildings.building_ids[start:end]),
+                pa.array(buildings.dataset_ids[start:end].astype(np.int32, copy=False)),
+                pa.array(buildings.target_ids[start:end]),
+                pa.array(buildings.lat_degrees[start:end]),
+                pa.array(buildings.lon_degrees[start:end]),
+                batch_neighbor_ids_list,
+                batch_neighbor_distance_list,
+                batch_neighbor_band_list,
+            ]
+
+            table = pa.Table.from_arrays(arrays, schema=schema)
+            writer.write_table(table)
 
 
 def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
