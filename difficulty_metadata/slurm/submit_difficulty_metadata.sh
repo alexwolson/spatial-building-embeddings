@@ -299,28 +299,41 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may rely on system install"
     fi
 
-    if [ -d "${VENV_PATH}" ]; then
+    if [ ! -d "${VENV_PATH}" ]; then
+        info "Creating virtual environment: ${VENV_PATH}"
+        if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
+            error_exit "Python module not available: ${PYTHON_MODULE}" 3
+        fi
+        module load "${PYTHON_MODULE}"
+        if ! command -v uv &> /dev/null; then
+            info "Installing uv..."
+            pip install uv || error_exit "Failed to install uv" 4
+        fi
+        uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
+        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
+        cd "${PROJECT_ROOT}"
+        WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+        uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to install project dependencies" 4
+        deactivate
+        info "Virtual environment created and dependencies installed"
+    else
         info "Virtual environment exists: ${VENV_PATH}"
         info "Verifying dependencies..."
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         if ! python -c "import pyarrow, numpy, sklearn, rich" 2>/dev/null; then
             warning "Key packages missing, reinstalling..."
+            if ! command -v uv &> /dev/null; then
+                info "Installing uv..."
+                pip install uv || error_exit "Failed to install uv" 4
+            fi
             cd "${PROJECT_ROOT}"
-            pip install -e . || error_exit "Failed to reinstall dependencies" 4
+            WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+            uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to reinstall dependencies" 4
+            info "Dependencies reinstalled"
         else
             info "Dependencies verified"
         fi
         deactivate
-    else
-        info "Creating virtual environment: ${VENV_PATH}"
-        module load "${PYTHON_MODULE}"
-        python -m venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        pip install --upgrade pip
-        cd "${PROJECT_ROOT}"
-        pip install -e . || error_exit "Failed to install project dependencies" 4
-        deactivate
-        info "Virtual environment created and dependencies installed"
     fi
 else
     info "Using system Python (--no-venv flag set)"
