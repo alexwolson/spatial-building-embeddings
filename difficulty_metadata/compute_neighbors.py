@@ -33,6 +33,43 @@ CALIBRATION_PERCENTILES = np.array([5, 10, 20, 40, 60, 85], dtype=np.float64)
 RNG_SEED = 42
 
 
+def _extract_positive_local_scales(
+    distances: np.ndarray,
+    k0: int,
+    *,
+    logger: logging.Logger | None = None,
+) -> np.ndarray:
+    """
+    Return the k0-th neighbour distance for each anchor, falling back to the
+    nearest strictly-positive distance when duplicates collapse the radius to zero.
+    """
+    if k0 < 1 or k0 > distances.shape[1]:
+        raise ValueError(f"k0 ({k0}) must be within the neighbour range.")
+
+    local_scales = distances[:, k0 - 1].astype(np.float64, copy=False)
+    non_positive_mask = local_scales <= 0.0
+
+    if non_positive_mask.any():
+        positive_distances = np.where(distances > 0.0, distances, np.inf)
+        fallback_scales = positive_distances.min(axis=1)
+        local_scales = np.where(non_positive_mask, fallback_scales, local_scales)
+
+        if logger and non_positive_mask.sum() > 0:
+            logger.warning(
+                "Adjusted %d anchors where k0-th neighbour distance was non-positive.",
+                int(non_positive_mask.sum()),
+            )
+
+    if not np.all(np.isfinite(local_scales)) or np.any(local_scales <= 0.0):
+        problematic = np.where(~np.isfinite(local_scales) | (local_scales <= 0.0))[0][:5]
+        raise ValueError(
+            "Unable to determine a positive local scale for all anchors; "
+            f"sample indices with issues: {problematic.tolist()}"
+        )
+
+    return local_scales
+
+
 class BuildingTable(NamedTuple):
     """Container for building-level arrays."""
 
@@ -209,10 +246,7 @@ def calibrate_band_edges(
     sample_indices = rng.choice(total, size=sample_size, replace=False)
     sampled_distances = distances[sample_indices].astype(np.float64, copy=False)
 
-    local_scales = sampled_distances[:, k0 - 1]
-    if np.any(local_scales <= 0):
-        raise ValueError("Encountered non-positive local scale during calibration.")
-
+    local_scales = _extract_positive_local_scales(sampled_distances, k0, logger=logger)
     standardized = sampled_distances / local_scales[:, None]
     edges = np.percentile(standardized, CALIBRATION_PERCENTILES, axis=None)
     logger.info("Calibrated band edges at percentiles %s: %s", CALIBRATION_PERCENTILES.tolist(), edges.tolist())
@@ -317,7 +351,11 @@ def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
         distance_dtype=distance_dtype_np,
     )
 
-    local_scales = distances[:, config.k0_for_local_scale - 1]
+    local_scales = _extract_positive_local_scales(
+        distances,
+        config.k0_for_local_scale,
+        logger=logger,
+    )
     rng = np.random.default_rng(RNG_SEED)
     edges = calibrate_band_edges(
         distances=distances,
