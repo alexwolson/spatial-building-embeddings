@@ -299,6 +299,26 @@ if [ "${NO_VENV}" = false ]; then
         module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may rely on system install"
     fi
 
+    PROJECT_DEPS=(
+        "huggingface-hub>=0.36.0,<1.0.0"
+        "pandas>=2.0.0"
+        "pillow>=10.0.0"
+        "pydantic>=2.0.0"
+        "pydantic-settings>=2.0.0"
+        "rich>=13.0.0"
+        "timm>=1.0.22"
+        "torch>=2.9.0"
+        "torchvision>=0.24.0"
+        "scikit-learn>=1.5.0"
+    )
+
+    WHEELHOUSE_DIRS=(
+        "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4"
+        "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3"
+        "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic"
+        "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+    )
+
     if [ ! -d "${VENV_PATH}" ]; then
         info "Creating virtual environment: ${VENV_PATH}"
         if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
@@ -312,41 +332,31 @@ if [ "${NO_VENV}" = false ]; then
         uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         cd "${PROJECT_ROOT}"
-        WHEELHOUSE_DIRS=(
-            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4"
-            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3"
-            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic"
-            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-        )
         FIND_LINK_FLAGS=()
         for WH in "${WHEELHOUSE_DIRS[@]}"; do
             FIND_LINK_FLAGS+=(--find-links "${WH}")
         done
-        uv pip install -e . "${FIND_LINK_FLAGS[@]}" || error_exit "Failed to install project dependencies" 4
+        uv pip install "${FIND_LINK_FLAGS[@]}" "${PROJECT_DEPS[@]}" || error_exit "Failed to install project dependencies" 4
+        uv pip install -e . --no-deps || error_exit "Failed to install project in editable mode" 4
         deactivate
         info "Virtual environment created and dependencies installed"
     else
         info "Virtual environment exists: ${VENV_PATH}"
         info "Verifying dependencies..."
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        if ! python -c "import pyarrow, numpy, sklearn, rich" 2>/dev/null; then
+        if ! python -c "import numpy, pandas, rich, sklearn" 2>/dev/null; then
             warning "Key packages missing, reinstalling..."
             if ! command -v uv &> /dev/null; then
                 info "Installing uv..."
                 pip install uv || error_exit "Failed to install uv" 4
             fi
             cd "${PROJECT_ROOT}"
-            WHEELHOUSE_DIRS=(
-                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4"
-                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3"
-                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic"
-                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-            )
             FIND_LINK_FLAGS=()
             for WH in "${WHEELHOUSE_DIRS[@]}"; do
                 FIND_LINK_FLAGS+=(--find-links "${WH}")
             done
-            uv pip install -e . "${FIND_LINK_FLAGS[@]}" || error_exit "Failed to reinstall dependencies" 4
+            uv pip install "${FIND_LINK_FLAGS[@]}" "${PROJECT_DEPS[@]}" || error_exit "Failed to reinstall dependencies" 4
+            uv pip install -e . --no-deps || error_exit "Failed to reinstall project in editable mode" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
