@@ -312,8 +312,17 @@ if [ "${NO_VENV}" = false ]; then
         uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         cd "${PROJECT_ROOT}"
-        WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-        uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to install project dependencies" 4
+        WHEELHOUSE_DIRS=(
+            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4"
+            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3"
+            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic"
+            "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+        )
+        FIND_LINK_FLAGS=()
+        for WH in "${WHEELHOUSE_DIRS[@]}"; do
+            FIND_LINK_FLAGS+=(--find-links "${WH}")
+        done
+        uv pip install -e . "${FIND_LINK_FLAGS[@]}" || error_exit "Failed to install project dependencies" 4
         deactivate
         info "Virtual environment created and dependencies installed"
     else
@@ -327,8 +336,17 @@ if [ "${NO_VENV}" = false ]; then
                 pip install uv || error_exit "Failed to install uv" 4
             fi
             cd "${PROJECT_ROOT}"
-            WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-            uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to reinstall dependencies" 4
+            WHEELHOUSE_DIRS=(
+                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4"
+                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3"
+                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic"
+                "/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
+            )
+            FIND_LINK_FLAGS=()
+            for WH in "${WHEELHOUSE_DIRS[@]}"; do
+                FIND_LINK_FLAGS+=(--find-links "${WH}")
+            done
+            uv pip install -e . "${FIND_LINK_FLAGS[@]}" || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
