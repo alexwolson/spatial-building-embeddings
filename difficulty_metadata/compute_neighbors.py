@@ -308,9 +308,9 @@ def write_parquet(
         ]
     )
 
-    encoded_metadata = {key: value.encode("utf-8") for key, value in metadata.items()}
+    encoded_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
 
-    with pq.ParquetWriter(output_path, schema=schema, compression="snappy", metadata=encoded_metadata) as writer:
+    with pq.ParquetWriter(output_path, schema=schema, compression="snappy") as writer:
         for start in range(0, total_rows, row_group_size):
             end = min(start + row_group_size, total_rows)
 
@@ -330,7 +330,16 @@ def write_parquet(
             ]
 
             table = pa.Table.from_arrays(arrays, schema=schema)
+            if start == 0 and encoded_metadata:
+                existing_metadata = table.schema.metadata or {}
+                merged_metadata = {**existing_metadata, **encoded_metadata}
+                table = table.replace_schema_metadata(merged_metadata)
             writer.write_table(table)
+
+    if metadata:
+        table_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
+        with pq.ParquetFile(output_path, metadata=table_metadata):
+            pass
 
 
 def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
