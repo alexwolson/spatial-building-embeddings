@@ -46,22 +46,36 @@ def _extract_positive_local_scales(
     if k0 < 1 or k0 > distances.shape[1]:
         raise ValueError(f"k0 ({k0}) must be within the neighbour range.")
 
+    positive_mask = distances > 0.0
+    if not positive_mask.any():
+        raise ValueError("All neighbour distances are zero; unable to derive local scales.")
+
+    global_min_positive = distances[positive_mask].min()
     local_scales = distances[:, k0 - 1].astype(np.float64, copy=False)
     non_positive_mask = local_scales <= 0.0
 
     if non_positive_mask.any():
-        positive_distances = np.where(distances > 0.0, distances, np.inf)
-        fallback_scales = positive_distances.min(axis=1)
+        fallback_scales = np.where(positive_mask, distances, np.inf).min(axis=1)
         local_scales = np.where(non_positive_mask, fallback_scales, local_scales)
 
-        if logger and non_positive_mask.sum() > 0:
+        if logger:
             logger.warning(
                 "Adjusted %d anchors where k0-th neighbour distance was non-positive.",
                 int(non_positive_mask.sum()),
             )
 
-    if not np.all(np.isfinite(local_scales)) or np.any(local_scales <= 0.0):
-        problematic = np.where(~np.isfinite(local_scales) | (local_scales <= 0.0))[0][:5]
+    still_bad_mask = (~np.isfinite(local_scales)) | (local_scales <= 0.0)
+    if still_bad_mask.any():
+        local_scales = np.where(still_bad_mask, global_min_positive, local_scales)
+        if logger:
+            logger.warning(
+                "Replaced %d anchors with global minimum positive distance due to missing fallback.",
+                int(still_bad_mask.sum()),
+            )
+
+    still_bad_mask = (~np.isfinite(local_scales)) | (local_scales <= 0.0)
+    if still_bad_mask.any():
+        problematic = np.where(still_bad_mask)[0][:5]
         raise ValueError(
             "Unable to determine a positive local scale for all anchors; "
             f"sample indices with issues: {problematic.tolist()}"
