@@ -292,6 +292,8 @@ if ! python3 -c "f=${SAMPLE_FRACTION}; exit(0 if 0.0 <= f <= 1.0 else 1)" 2>/dev
 fi
 
 # Step 5: Setup Python environment
+ORIGINAL_PWD="$(pwd)"
+
 if [ "${NO_VENV}" = false ]; then
     if [ -n "${ARROW_MODULE}" ]; then
         info "Loading Arrow module: ${ARROW_MODULE}"
@@ -338,6 +340,7 @@ if [ "${NO_VENV}" = false ]; then
         done
         uv pip install "${FIND_LINK_FLAGS[@]}" "${PROJECT_DEPS[@]}" || error_exit "Failed to install project dependencies" 4
         uv pip install -e . --no-deps || error_exit "Failed to install project in editable mode" 4
+        cd "${ORIGINAL_PWD}"
         deactivate
         info "Virtual environment created and dependencies installed"
     else
@@ -357,6 +360,7 @@ if [ "${NO_VENV}" = false ]; then
             done
             uv pip install "${FIND_LINK_FLAGS[@]}" "${PROJECT_DEPS[@]}" || error_exit "Failed to reinstall dependencies" 4
             uv pip install -e . --no-deps || error_exit "Failed to reinstall project in editable mode" 4
+            cd "${ORIGINAL_PWD}"
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
