@@ -40,12 +40,17 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
 
     # Create Rich handler
     if log_file:
+        log_file = Path(log_file)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file_handle = open(log_file, "w", encoding="utf-8")
         # When writing to file, use file-aware console
         handler = RichHandler(
-            console=Console(file=open(log_file, "w", encoding="utf-8")),
+            console=Console(file=log_file_handle),
             rich_tracebacks=True,
             show_path=False,
         )
+        # Keep reference so handle stays open
+        handler.log_file_handle = log_file_handle  # type: ignore[attr-defined]
     else:
         handler = RichHandler(rich_tracebacks=True, show_path=False)
 
@@ -536,4 +541,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
