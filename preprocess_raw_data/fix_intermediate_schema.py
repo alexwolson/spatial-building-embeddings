@@ -58,7 +58,9 @@ def infer_dataset_id_from_building(series: pd.Series) -> pd.Series:
     return dataset_numeric.astype("int64")
 
 
-def fix_dataframe(df: pd.DataFrame, logger: logging.Logger) -> tuple[pd.DataFrame, list[str]]:
+def fix_dataframe(
+    df: pd.DataFrame, logger: logging.Logger
+) -> tuple[pd.DataFrame, list[str]]:
     """
     Apply column fixes to the dataframe.
 
@@ -67,12 +69,20 @@ def fix_dataframe(df: pd.DataFrame, logger: logging.Logger) -> tuple[pd.DataFram
     notes: list[str] = []
     working_df = df.copy()
 
-    if "dataset_target_id" in working_df.columns and "building_id" not in working_df.columns:
+    if (
+        "dataset_target_id" in working_df.columns
+        and "building_id" not in working_df.columns
+    ):
         working_df = working_df.rename(columns={"dataset_target_id": "building_id"})
         notes.append("renamed dataset_target_id -> building_id")
 
-    if "dataset_patch_id" in working_df.columns and "streetview_image_id" not in working_df.columns:
-        working_df = working_df.rename(columns={"dataset_patch_id": "streetview_image_id"})
+    if (
+        "dataset_patch_id" in working_df.columns
+        and "streetview_image_id" not in working_df.columns
+    ):
+        working_df = working_df.rename(
+            columns={"dataset_patch_id": "streetview_image_id"}
+        )
         notes.append("renamed dataset_patch_id -> streetview_image_id")
 
     if "dataset_target_patch_id" in working_df.columns:
@@ -84,11 +94,15 @@ def fix_dataframe(df: pd.DataFrame, logger: logging.Logger) -> tuple[pd.DataFram
             raise ValueError(
                 "Cannot infer dataset_id: building_id column missing after renames."
             )
-        working_df["dataset_id"] = infer_dataset_id_from_building(working_df["building_id"])
+        working_df["dataset_id"] = infer_dataset_id_from_building(
+            working_df["building_id"]
+        )
         notes.append("inferred dataset_id from building_id")
     else:
         # Normalise dtype to int64 for consistency
-        working_df["dataset_id"] = pd.to_numeric(working_df["dataset_id"], errors="raise").astype("int64")
+        working_df["dataset_id"] = pd.to_numeric(
+            working_df["dataset_id"], errors="raise"
+        ).astype("int64")
 
     # Ensure identifier columns are strings
     for col in ["building_id", "streetview_image_id"]:
@@ -199,4 +213,3 @@ def main(argv: Iterable[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

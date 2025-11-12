@@ -17,7 +17,13 @@ import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 
 from preprocess_raw_data.config import MergeAndSplitConfig, load_config_from_file
 from pandas.util import hash_pandas_object
@@ -140,7 +146,9 @@ def add_coordinate_hash(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFram
     return df
 
 
-def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path | None = None) -> pd.DataFrame:
+def ensure_dataset_id(
+    df: pd.DataFrame, logger: logging.Logger, *, source: Path | None = None
+) -> pd.DataFrame:
     """
     Guarantee that a `dataset_id` column exists with integer dtype.
 
@@ -151,13 +159,17 @@ def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path 
 
     def _coerce_numeric(series: pd.Series, label: str) -> pd.Series:
         numeric = pd.to_numeric(series, errors="coerce")
-        return pd.Series(pd.array(numeric, dtype="Int64"), index=working_df.index, name=label)
+        return pd.Series(
+            pd.array(numeric, dtype="Int64"), index=working_df.index, name=label
+        )
 
     # Start with existing dataset_id values if present
     if "dataset_id" in working_df.columns:
         dataset_series = _coerce_numeric(working_df["dataset_id"], "dataset_id")
     else:
-        dataset_series = pd.Series(pd.array([pd.NA] * len(working_df), dtype="Int64"), index=working_df.index)
+        dataset_series = pd.Series(
+            pd.array([pd.NA] * len(working_df), dtype="Int64"), index=working_df.index
+        )
 
     # Helper to merge inferred values into dataset_series
     def _fill_from(label: str, values: pd.Series) -> None:
@@ -183,7 +195,9 @@ def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path 
         _fill_from("building_id", prefixes)
 
     if dataset_series.isna().any() and "streetview_image_id" in working_df.columns:
-        prefixes = working_df["streetview_image_id"].astype(str).str.split("_", n=1).str[0]
+        prefixes = (
+            working_df["streetview_image_id"].astype(str).str.split("_", n=1).str[0]
+        )
         _fill_from("streetview_image_id", prefixes)
 
     if dataset_series.isna().any() and "image_path" in working_df.columns:
@@ -197,7 +211,9 @@ def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path 
     if dataset_series.isna().any():
         sample_missing = min(5, int(dataset_series.isna().sum()))
         context_columns = [
-            col for col in ["building_id", "streetview_image_id", "image_path", "tar_file"] if col in working_df.columns
+            col
+            for col in ["building_id", "streetview_image_id", "image_path", "tar_file"]
+            if col in working_df.columns
         ]
         context = (
             working_df.loc[dataset_series.isna(), context_columns].head(sample_missing)
@@ -217,7 +233,9 @@ def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path 
     return working_df
 
 
-def filter_singleton_buildings(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
+def filter_singleton_buildings(
+    df: pd.DataFrame, logger: logging.Logger
+) -> pd.DataFrame:
     """Remove entries where a building_id appears only once."""
     if "building_id" not in df.columns:
         raise ValueError("Expected 'building_id' column to filter singleton buildings.")
@@ -252,7 +270,11 @@ def filter_singleton_buildings(df: pd.DataFrame, logger: logging.Logger) -> pd.D
     logger.info(
         "Removed %s entries (%.1f%%)",
         f"{total_entries_before - total_entries_after:,}",
-        ((total_entries_before - total_entries_after) / total_entries_before * 100) if total_entries_before else 0.0,
+        (
+            ((total_entries_before - total_entries_after) / total_entries_before * 100)
+            if total_entries_before
+            else 0.0
+        ),
     )
 
     return filtered_df
@@ -274,7 +296,9 @@ def create_splits(
     n_targets = len(unique_target_keys)
 
     logger.info(f"Splitting {n_targets:,} unique building_ids")
-    logger.info(f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}")
+    logger.info(
+        f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
+    )
 
     # Shuffle composite identifiers deterministically
     rng = np.random.default_rng(seed)
@@ -291,7 +315,9 @@ def create_splits(
 
     # Assign split labels
     df["split"] = df["building_id"].map(
-        lambda tid: "train" if tid in train_ids else ("val" if tid in val_ids else "test")
+        lambda tid: (
+            "train" if tid in train_ids else ("val" if tid in val_ids else "test")
+        )
     )
 
     # Log split statistics
@@ -325,7 +351,9 @@ def write_final_files(
         logger.info(f"Writing {split} split: {len(split_df):,} entries")
 
         # Drop split and tar_file columns (not needed in final files)
-        split_df = split_df.drop(columns=["split", "tar_file", "image_path"], errors="ignore")
+        split_df = split_df.drop(
+            columns=["split", "tar_file", "image_path"], errors="ignore"
+        )
 
         # Write final file
         final_file = output_dir / f"{split}.parquet"
@@ -341,7 +369,9 @@ def write_final_files(
         progress.update(task, advance=1)
 
         file_size_mb = final_file.stat().st_size / (1024 * 1024)
-        logger.info(f"Wrote {final_file.name}: {len(split_df):,} entries, {file_size_mb:.1f} MB")
+        logger.info(
+            f"Wrote {final_file.name}: {len(split_df):,} entries, {file_size_mb:.1f} MB"
+        )
 
 
 def merge_and_split(
@@ -381,7 +411,9 @@ def merge_and_split(
 
     # Warn if counts differ
     intermediate_stems = {path.stem for path in intermediate_files}
-    embedding_stems = {path.stem.removesuffix("_embeddings") for path in embedding_files}
+    embedding_stems = {
+        path.stem.removesuffix("_embeddings") for path in embedding_files
+    }
     missing_embeddings = sorted(intermediate_stems - embedding_stems)
     if missing_embeddings:
         logger.warning(
@@ -445,7 +477,9 @@ def merge_and_split(
     logger.info("=" * 60)
     logger.info("Dataset assembly complete")
     logger.info("=" * 60)
-    logger.info(f"Total intermediate files processed: {stats['total_intermediate_files']}")
+    logger.info(
+        f"Total intermediate files processed: {stats['total_intermediate_files']}"
+    )
     logger.info(f"Total entries in final dataset: {stats['total_rows_read']:,}")
     logger.info(f"Unique building_ids: {stats['unique_building_ids']:,}")
     logger.info(f"Train entries: {stats['train_entries']:,}")

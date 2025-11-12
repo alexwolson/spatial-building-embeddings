@@ -24,13 +24,27 @@ class GenerateEmbeddingsConfig(BaseSettings):
         extra="ignore",
     )
 
-    parquet_file: Path = Field(..., description="Path to intermediate parquet file to process")
-    tar_file: Path | None = Field(None, description="Optional: tar file path (auto-detect if None)")
-    output_dir: Path = Field(..., description="Output directory for embedding parquet files")
-    model_name: str = Field("vit_base_patch14_dinov2.lvd142m", description="Timm model name")
-    batch_size: int = Field(128, ge=1, description="Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)")
+    parquet_file: Path = Field(
+        ..., description="Path to intermediate parquet file to process"
+    )
+    tar_file: Path | None = Field(
+        None, description="Optional: tar file path (auto-detect if None)"
+    )
+    output_dir: Path = Field(
+        ..., description="Output directory for embedding parquet files"
+    )
+    model_name: str = Field(
+        "vit_base_patch14_dinov2.lvd142m", description="Timm model name"
+    )
+    batch_size: int = Field(
+        128,
+        ge=1,
+        description="Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)",
+    )
     # Note: GPU is always required - no device parameter, script will fail if GPU unavailable
-    temp_dir: Path | None = Field(None, description="Optional temporary directory for extraction")
+    temp_dir: Path | None = Field(
+        None, description="Optional temporary directory for extraction"
+    )
     log_file: Path | None = Field(None, description="Optional log file path")
 
     def model_post_init(self, __context):
@@ -118,4 +132,3 @@ def load_config_from_file(
         return GenerateEmbeddingsConfig(**config_data)
     else:
         raise ValueError(f"Unknown config type: {config_type}")
-

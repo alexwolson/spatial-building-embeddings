@@ -71,7 +71,9 @@ class TripletDataset(Dataset):
         self.embeddings.share_memory_()
         del embedding_matrix
 
-        self.building_ids = embeddings_df["building_id"].astype(str).to_numpy(copy=False)
+        self.building_ids = (
+            embeddings_df["building_id"].astype(str).to_numpy(copy=False)
+        )
 
         # Group indices by building_id
         self.building_to_indices: dict[str, list[int]] = defaultdict(list)
@@ -91,14 +93,22 @@ class TripletDataset(Dataset):
 
         # Pre-compute valid building ids list for sampling
         self.valid_building_ids = list(self.valid_buildings.keys())
-        self.valid_building_ids_array = np.asarray(self.valid_building_ids, dtype=object)
+        self.valid_building_ids_array = np.asarray(
+            self.valid_building_ids, dtype=object
+        )
         self.num_valid_buildings = len(self.valid_building_ids)
-        self.total_anchor_candidates = sum(indices.size for indices in self.valid_buildings.values())
+        self.total_anchor_candidates = sum(
+            indices.size for indices in self.valid_buildings.values()
+        )
         if self.total_anchor_candidates == 0:
-            raise ValueError("No buildings with at least two images available for triplet sampling.")
+            raise ValueError(
+                "No buildings with at least two images available for triplet sampling."
+            )
 
         # Determine epoch length from config
-        self.samples_per_epoch = min(config.samples_per_epoch, self.total_anchor_candidates)
+        self.samples_per_epoch = min(
+            config.samples_per_epoch, self.total_anchor_candidates
+        )
         self.samples_per_epoch = max(1, self.samples_per_epoch)
 
         # Build difficulty metadata index
@@ -133,7 +143,9 @@ class TripletDataset(Dataset):
         required_cols = {"target_coord_hash", "neighbor_building_ids", "neighbor_bands"}
         missing = required_cols - set(difficulty_metadata_df.columns)
         if missing:
-            raise ValueError(f"Missing required columns in difficulty_metadata_df: {missing}")
+            raise ValueError(
+                f"Missing required columns in difficulty_metadata_df: {missing}"
+            )
 
         # Create mapping from building_id to neighbors by band
         # Difficulty metadata uses target_coord_hash as key, so we need to map via coordinate hash
@@ -159,7 +171,9 @@ class TripletDataset(Dataset):
                 self.building_to_bands[building_id] = bands
                 self.building_to_distances[building_id] = distances
 
-        logger.info(f"Indexed difficulty metadata for {len(self.building_to_neighbors)} buildings")
+        logger.info(
+            f"Indexed difficulty metadata for {len(self.building_to_neighbors)} buildings"
+        )
 
     def __len__(self) -> int:
         """Return number of valid triplets (approximate)."""
@@ -178,7 +192,9 @@ class TripletDataset(Dataset):
         building_indices = self.valid_buildings[building_id]
 
         # Sample anchor and positive from same building
-        anchor_idx, positive_idx = np.random.choice(building_indices, size=2, replace=False)
+        anchor_idx, positive_idx = np.random.choice(
+            building_indices, size=2, replace=False
+        )
         anchor_idx = int(anchor_idx)
         positive_idx = int(positive_idx)
 
@@ -208,12 +224,16 @@ class TripletDataset(Dataset):
             Tuple of (negative_idx, difficulty_band)
         """
         # Get neighbors and bands for this building
-        neighbors = self._ensure_sequence(self.building_to_neighbors.get(anchor_building_id))
+        neighbors = self._ensure_sequence(
+            self.building_to_neighbors.get(anchor_building_id)
+        )
         bands = self._ensure_sequence(self.building_to_bands.get(anchor_building_id))
 
         if len(neighbors) == 0 or len(bands) == 0:
             # Fallback: sample random building that's not the anchor
-            negative_building_id = self._random_building_id(exclude_id=anchor_building_id)
+            negative_building_id = self._random_building_id(
+                exclude_id=anchor_building_id
+            )
             negative_indices = self.valid_buildings[negative_building_id]
             negative_idx = int(np.random.choice(negative_indices))
             return negative_idx, -1  # Unknown band (fallback)
@@ -238,7 +258,9 @@ class TripletDataset(Dataset):
         valid_candidates = [c for c in candidates if c in self.valid_buildings]
         if not valid_candidates:
             # Fallback: sample any other building
-            negative_building_id = self._random_building_id(exclude_id=anchor_building_id)
+            negative_building_id = self._random_building_id(
+                exclude_id=anchor_building_id
+            )
             used_selected_band = False
         else:
             negative_building_id = np.random.choice(valid_candidates)

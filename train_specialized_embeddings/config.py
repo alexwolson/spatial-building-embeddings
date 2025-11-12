@@ -25,19 +25,31 @@ class TripletTrainingConfig(BaseSettings):
     )
 
     # Data paths
-    train_parquet_path: Path = Field(..., description="Path to training split parquet file")
-    val_parquet_path: Path = Field(..., description="Path to validation split parquet file")
-    difficulty_metadata_path: Path = Field(..., description="Path to difficulty_metadata.parquet")
+    train_parquet_path: Path = Field(
+        ..., description="Path to training split parquet file"
+    )
+    val_parquet_path: Path = Field(
+        ..., description="Path to validation split parquet file"
+    )
+    difficulty_metadata_path: Path = Field(
+        ..., description="Path to difficulty_metadata.parquet"
+    )
     checkpoint_dir: Path = Field(..., description="Directory for saving checkpoints")
-    output_embeddings_dir: Path | None = Field(None, description="Directory for saving final embeddings (optional)")
+    output_embeddings_dir: Path | None = Field(
+        None, description="Directory for saving final embeddings (optional)"
+    )
 
     # Model architecture
-    input_dim: int = Field(768, description="Input embedding dimension (DINOv2 base = 768)")
+    input_dim: int = Field(
+        768, description="Input embedding dimension (DINOv2 base = 768)"
+    )
     hidden_dim: int = Field(512, description="Hidden layer dimension")
     output_dim: int = Field(256, description="Output embedding dimension")
     dropout: float = Field(0.1, ge=0.0, le=1.0, description="Dropout probability")
     use_residual: bool = Field(True, description="Use residual shortcut connection")
-    use_layer_norm: bool = Field(True, description="Use LayerNorm after each hidden layer")
+    use_layer_norm: bool = Field(
+        True, description="Use LayerNorm after each hidden layer"
+    )
 
     # Training hyperparameters
     batch_size: PositiveInt = Field(256, description="Batch size for training")
@@ -45,35 +57,77 @@ class TripletTrainingConfig(BaseSettings):
     learning_rate: PositiveFloat = Field(1e-4, description="Learning rate")
     weight_decay: float = Field(1e-5, ge=0.0, description="Weight decay for optimizer")
     margin: PositiveFloat = Field(0.5, description="Triplet loss margin")
-    loss_distance: Literal["euclidean", "cosine"] = Field("euclidean", description="Distance metric for triplet loss")
+    loss_distance: Literal["euclidean", "cosine"] = Field(
+        "euclidean", description="Distance metric for triplet loss"
+    )
     samples_per_epoch: PositiveInt = Field(
         250_000,
         description="Maximum number of triplet samples drawn per epoch",
     )
 
     # UCB sampler configuration
-    ucb_exploration_constant: float = Field(2.0, ge=0.0, description="UCB exploration constant (c)")
-    ucb_warmup_samples: int = Field(1000, ge=0, description="Number of warmup samples before UCB kicks in")
+    ucb_exploration_constant: float = Field(
+        2.0, ge=0.0, description="UCB exploration constant (c)"
+    )
+    ucb_warmup_samples: int = Field(
+        1000, ge=0, description="Number of warmup samples before UCB kicks in"
+    )
 
     # Training configuration
-    device: Literal["cuda", "cpu", "auto"] = Field("auto", description="Device to use (auto detects GPU)")
+    device: Literal["cuda", "cpu", "auto"] = Field(
+        "auto", description="Device to use (auto detects GPU)"
+    )
     num_workers: int = Field(4, ge=0, description="Number of data loader workers")
     pin_memory: bool = Field(True, description="Pin memory for data loader")
     seed: int = Field(42, description="Random seed for reproducibility")
 
     # Checkpointing and validation
-    save_every_n_epochs: int = Field(5, ge=1, description="Save checkpoint every N epochs")
-    validate_every_n_epochs: int = Field(1, ge=1, description="Run validation every N epochs")
-    resume_from_checkpoint: Path | None = Field(None, description="Path to checkpoint to resume from")
+    save_every_n_epochs: int = Field(
+        5, ge=1, description="Save checkpoint every N epochs"
+    )
+    validate_every_n_epochs: int = Field(
+        1, ge=1, description="Run validation every N epochs"
+    )
+    resume_from_checkpoint: Path | None = Field(
+        None, description="Path to checkpoint to resume from"
+    )
+    early_stopping_patience: int = Field(
+        0,
+        ge=0,
+        description="Number of validations with no improvement before stopping (0 disables early stopping)",
+    )
 
     # Logging
     log_file: Path | None = Field(None, description="Optional log file path")
-    log_every_n_batches: int = Field(100, ge=1, description="Log metrics every N batches")
+    log_every_n_batches: int = Field(
+        100, ge=1, description="Log metrics every N batches"
+    )
+    wandb_enabled: bool = Field(
+        False,
+        description="Enable logging to Weights & Biases (wandb)",
+    )
+    wandb_project: str | None = Field(
+        None,
+        description="wandb project name",
+    )
+    wandb_entity: str | None = Field(
+        None,
+        description="wandb entity (team or user)",
+    )
+    wandb_run_name: str | None = Field(
+        None,
+        description="Optional explicit wandb run name",
+    )
+    wandb_mode: Literal["online", "offline"] = Field(
+        "offline",
+        description="wandb mode: online syncs immediately, offline defers sync",
+    )
 
     def model_post_init(self, __context):
         """Validate configuration after initialization."""
         if self.device == "auto":
             import torch
+
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -109,4 +163,3 @@ def load_config_from_file(
         return TripletTrainingConfig(**config_data)
 
     raise ValueError(f"Unknown config type: {config_type}")
-

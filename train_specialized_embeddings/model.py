@@ -144,7 +144,9 @@ class TripletLossWrapper:
         else:
             raise ValueError(f"Unknown distance metric: {distance}")
 
-        logger.info(f"Initialized TripletLossWrapper: margin={margin}, distance={distance}")
+        logger.info(
+            f"Initialized TripletLossWrapper: margin={margin}, distance={distance}"
+        )
 
     def __call__(
         self,
@@ -185,4 +187,3 @@ class TripletLossWrapper:
         loss = self(anchor, positive, negative)
         # Reward is negative loss (higher loss = lower reward)
         return -loss.item()
-

@@ -50,7 +50,9 @@ def _extract_positive_local_scales(
 
     positive_mask = distances > 0.0
     if not positive_mask.any():
-        raise ValueError("All neighbour distances are zero; unable to derive local scales.")
+        raise ValueError(
+            "All neighbour distances are zero; unable to derive local scales."
+        )
 
     global_min_positive = distances[positive_mask].min()
     local_scales = distances[:, k0 - 1].astype(np.float64, copy=False)
@@ -141,7 +143,9 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
         "target_lon",
         "target_coord_hash",
     ]
-    missing = [column for column in required_columns if column not in dataset.schema.names]
+    missing = [
+        column for column in required_columns if column not in dataset.schema.names
+    ]
     if missing:
         raise ValueError(f"Missing required columns in dataset: {', '.join(missing)}")
 
@@ -269,24 +273,39 @@ def calibrate_band_edges(
             FULL_DATASET_CALIBRATION_THRESHOLD,
         )
     else:
-        sample_size = max(int(math.ceil(total * sample_fraction)), MIN_CALIBRATION_SAMPLE)
+        sample_size = max(
+            int(math.ceil(total * sample_fraction)), MIN_CALIBRATION_SAMPLE
+        )
         sample_size = min(sample_size, total)
-        logger.info("Sampling %d anchors (%.2f%%) for band calibration", sample_size, (sample_size / total) * 100)
+        logger.info(
+            "Sampling %d anchors (%.2f%%) for band calibration",
+            sample_size,
+            (sample_size / total) * 100,
+        )
         sample_indices = rng.choice(total, size=sample_size, replace=False)
     sampled_distances = distances[sample_indices].astype(np.float64, copy=False)
 
     local_scales = _extract_positive_local_scales(sampled_distances, k0, logger=logger)
     standardized = sampled_distances / local_scales[:, None]
     edges = np.percentile(standardized, CALIBRATION_PERCENTILES, axis=None)
-    logger.info("Calibrated band edges at percentiles %s: %s", CALIBRATION_PERCENTILES.tolist(), edges.tolist())
+    logger.info(
+        "Calibrated band edges at percentiles %s: %s",
+        CALIBRATION_PERCENTILES.tolist(),
+        edges.tolist(),
+    )
     return edges.astype(np.float32, copy=False)
 
 
-def assign_bands(distances: np.ndarray, local_scales: np.ndarray, edges: np.ndarray) -> np.ndarray:
+def assign_bands(
+    distances: np.ndarray, local_scales: np.ndarray, edges: np.ndarray
+) -> np.ndarray:
     """Assign difficulty bands using global quantile edges."""
     if np.any(local_scales <= 0):
         raise ValueError("Encountered non-positive local scale while assigning bands.")
-    standardized = distances.astype(np.float64, copy=False) / local_scales.astype(np.float64, copy=False)[:, None]
+    standardized = (
+        distances.astype(np.float64, copy=False)
+        / local_scales.astype(np.float64, copy=False)[:, None]
+    )
     bands = np.searchsorted(edges, standardized, side="right")
     return bands.astype(np.int16, copy=False)
 
@@ -321,11 +340,16 @@ def write_parquet(
 
     table = pa.Table.from_pandas(df, preserve_index=False)
     if metadata:
-        encoded_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
+        encoded_metadata = {
+            key.encode("utf-8"): value.encode("utf-8")
+            for key, value in metadata.items()
+        }
         existing_metadata = table.schema.metadata or {}
         table = table.replace_schema_metadata({**existing_metadata, **encoded_metadata})
 
-    pq.write_table(table, output_path, compression="snappy", row_group_size=row_group_size)
+    pq.write_table(
+        table, output_path, compression="snappy", row_group_size=row_group_size
+    )
 
 
 def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
@@ -397,7 +421,9 @@ def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
 
 def main() -> int:
     """CLI entry point."""
-    parser = argparse.ArgumentParser(description="Compute difficulty metadata for buildings.")
+    parser = argparse.ArgumentParser(
+        description="Compute difficulty metadata for buildings."
+    )
     parser.add_argument(
         "--config",
         type=Path,

@@ -31,7 +31,13 @@ import torch.nn as nn
 from PIL import Image
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 import timm
 
 from generate_embeddings.config import GenerateEmbeddingsConfig, load_config_from_file
@@ -72,7 +78,9 @@ def validate_gpu_available() -> None:
     device_count = torch.cuda.device_count()
     if device_count == 0:
         raise RuntimeError("CUDA is available but no GPU devices found.")
-    logging.info(f"GPU available: {torch.cuda.get_device_name(0)} (device 0 of {device_count})")
+    logging.info(
+        f"GPU available: {torch.cuda.get_device_name(0)} (device 0 of {device_count})"
+    )
 
 
 def load_model_and_transforms(model_name: str) -> tuple[nn.Module, nn.Module]:
@@ -101,7 +109,9 @@ def load_model_and_transforms(model_name: str) -> tuple[nn.Module, nn.Module]:
     data_config = timm.data.resolve_model_data_config(model)
     transform = timm.data.create_transform(**data_config, is_training=False)
     logger.info(f"Model loaded and moved to {device}")
-    logger.info(f"Transform config: input_size={data_config.get('input_size', 'unknown')}")
+    logger.info(
+        f"Transform config: input_size={data_config.get('input_size', 'unknown')}"
+    )
 
     return model, transform
 
@@ -109,7 +119,9 @@ def load_model_and_transforms(model_name: str) -> tuple[nn.Module, nn.Module]:
 class ImageDataset(torch.utils.data.Dataset):
     """Dataset for loading images from paths."""
 
-    def __init__(self, image_paths: list[Path], transform: nn.Module, extract_dir: Path):
+    def __init__(
+        self, image_paths: list[Path], transform: nn.Module, extract_dir: Path
+    ):
         self.image_paths = image_paths
         self.transform = transform
         self.extract_dir = extract_dir
@@ -179,13 +191,15 @@ def _infer_path_transform(
             candidate_path = extract_dir / transform(sample)
             if candidate_path.exists():
                 if name != "direct":
-                    logger.info("Detected '%s' path transform for extracted images", name)
+                    logger.info(
+                        "Detected '%s' path transform for extracted images", name
+                    )
                 return transform
 
-    logger.warning("Unable to infer path transform from samples; defaulting to direct paths")
+    logger.warning(
+        "Unable to infer path transform from samples; defaulting to direct paths"
+    )
     return identity
-
-
 
 
 def _format_duration(seconds: float) -> str:
@@ -286,7 +300,11 @@ def generate_embeddings_batch(
                 ):
                     elapsed = now - start_time
                     rate = num_processed / elapsed if elapsed > 0 else 0.0
-                    remaining = (total_images - num_processed) / rate if rate > 0 else float("nan")
+                    remaining = (
+                        (total_images - num_processed) / rate
+                        if rate > 0
+                        else float("nan")
+                    )
                     logger.info(
                         "Progress: %s/%s (%.1f%%) processed; elapsed %s; ETA %s",
                         f"{num_processed:,}",
@@ -299,7 +317,9 @@ def generate_embeddings_batch(
 
     # Concatenate all embeddings
     all_embeddings = np.concatenate(all_embeddings, axis=0)
-    logger.info(f"Generated {len(all_embeddings)} embeddings of dimension {all_embeddings.shape[1]}")
+    logger.info(
+        f"Generated {len(all_embeddings)} embeddings of dimension {all_embeddings.shape[1]}"
+    )
     total_elapsed = time.time() - start_time
     logger.info(
         "Finished embedding generation in %s (avg %.1f images/sec)",
@@ -378,12 +398,16 @@ def process_intermediate_file(
         # Debug: Check extraction structure
         extract_subdirs = [d for d in temp_extract_dir.iterdir() if d.is_dir()]
         if extract_subdirs:
-            logger.info(f"Extracted structure: found {len(extract_subdirs)} top-level directories")
+            logger.info(
+                f"Extracted structure: found {len(extract_subdirs)} top-level directories"
+            )
             # Check if we need to adjust path resolution
             sample_dir = extract_subdirs[0]
             sample_files = list(sample_dir.rglob("*.jpg"))[:3]
             if sample_files:
-                logger.info(f"Sample extracted image path: {sample_files[0].relative_to(temp_extract_dir)}")
+                logger.info(
+                    f"Sample extracted image path: {sample_files[0].relative_to(temp_extract_dir)}"
+                )
 
         # Load model and transforms
         model, transform = load_model_and_transforms(model_name)
@@ -393,7 +417,9 @@ def process_intermediate_file(
         if not image_paths.empty:
             logger.info(f"Sample parquet image path: {image_paths.iloc[0]}")
 
-        path_transform = _infer_path_transform(image_paths.tolist(), temp_extract_dir, logger)
+        path_transform = _infer_path_transform(
+            image_paths.tolist(), temp_extract_dir, logger
+        )
 
         valid_indices: list[int] = []
         valid_image_paths: list[Path] = []
@@ -492,7 +518,9 @@ def process_intermediate_file(
         )
 
         file_size_mb = output_file.stat().st_size / (1024 * 1024)
-        logger.info(f"Successfully wrote {len(df_output):,} entries to {output_file} ({file_size_mb:.1f} MB)")
+        logger.info(
+            f"Successfully wrote {len(df_output):,} entries to {output_file} ({file_size_mb:.1f} MB)"
+        )
 
         return stats
 

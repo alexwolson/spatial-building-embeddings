@@ -25,9 +25,13 @@ class ProcessTarConfig(BaseSettings):
     )
 
     tar_file: Path = Field(..., description="Path to tar file to process")
-    output_dir: Path = Field(..., description="Output directory for intermediate Parquet files")
+    output_dir: Path = Field(
+        ..., description="Output directory for intermediate Parquet files"
+    )
     log_file: Path | None = Field(None, description="Optional log file path")
-    temp_dir: Path | None = Field(None, description="Optional temporary directory for extraction")
+    temp_dir: Path | None = Field(
+        None, description="Optional temporary directory for extraction"
+    )
 
 
 class MergeAndSplitConfig(BaseSettings):
@@ -39,9 +43,15 @@ class MergeAndSplitConfig(BaseSettings):
         extra="ignore",
     )
 
-    intermediates_dir: Path = Field(..., description="Directory containing intermediate Parquet files")
-    output_dir: Path = Field(..., description="Directory for final output Parquet files")
-    embeddings_dir: Path = Field(..., description="Directory containing per-tar embedding Parquet files")
+    intermediates_dir: Path = Field(
+        ..., description="Directory containing intermediate Parquet files"
+    )
+    output_dir: Path = Field(
+        ..., description="Directory for final output Parquet files"
+    )
+    embeddings_dir: Path = Field(
+        ..., description="Directory containing per-tar embedding Parquet files"
+    )
     train_ratio: float = Field(0.7, ge=0.0, le=1.0, description="Training set ratio")
     val_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Validation set ratio")
     test_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Test set ratio")
@@ -91,4 +101,3 @@ def load_config_from_file(
         return MergeAndSplitConfig(**config_data)
     else:
         raise ValueError(f"Unknown config type: {config_type}")
-

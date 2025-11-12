@@ -95,6 +95,3 @@ def load_config_from_file(
         return DifficultyMetadataConfig(**config_data)
 
     raise ValueError(f"Unknown config type: {config_type}")
-
-
-

@@ -18,7 +18,13 @@ import pandas as pd
 from PIL import Image
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 
 from preprocess_raw_data.config import ProcessTarConfig, load_config_from_file
 
@@ -66,7 +72,9 @@ def extract_dataset_id(tar_path: Path) -> int:
     try:
         return int(stem)
     except ValueError as e:
-        raise ValueError(f"Could not extract dataset ID from tar filename: {tar_path}") from e
+        raise ValueError(
+            f"Could not extract dataset ID from tar filename: {tar_path}"
+        ) from e
 
 
 def parse_metadata_file(txt_path: Path, dataset_id: int) -> MetadataEntry | None:
@@ -220,7 +228,9 @@ def process_tar_file(
             TaskProgressColumn(),
             refresh_per_second=1,  # Update once per second to minimize log file bloat
         ) as progress:
-            task = progress.add_task("Processing metadata files...", total=len(txt_files))
+            task = progress.add_task(
+                "Processing metadata files...", total=len(txt_files)
+            )
 
             for txt_file in txt_files:
                 # Parse metadata
@@ -385,4 +395,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

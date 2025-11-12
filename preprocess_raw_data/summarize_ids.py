@@ -43,7 +43,9 @@ TARGET_COLUMN_CANDIDATES = ("targetID", "target_id")
 PATCH_COLUMN_CANDIDATES = ("patchID", "patch_id")
 
 
-def _resolve_column(schema_names: Iterable[str], candidates: Tuple[str, ...], parquet_path: Path) -> str:
+def _resolve_column(
+    schema_names: Iterable[str], candidates: Tuple[str, ...], parquet_path: Path
+) -> str:
     for candidate in candidates:
         if candidate in schema_names:
             return candidate
@@ -65,8 +67,12 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
         schema = pq.read_schema(parquet_path)
         schema_names = schema.names
 
-        dataset_col = next((col for col in DATASET_COLUMN_CANDIDATES if col in schema_names), None)
-        target_col = _resolve_column(schema_names, TARGET_COLUMN_CANDIDATES, parquet_path)
+        dataset_col = next(
+            (col for col in DATASET_COLUMN_CANDIDATES if col in schema_names), None
+        )
+        target_col = _resolve_column(
+            schema_names, TARGET_COLUMN_CANDIDATES, parquet_path
+        )
         patch_col = _resolve_column(schema_names, PATCH_COLUMN_CANDIDATES, parquet_path)
 
         required_columns = {target_col, patch_col}
@@ -75,10 +81,14 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
         optional_columns = [
             col for col in ("building_id", "streetview_image_id") if col in schema_names
         ]
-        df = pd.read_parquet(parquet_path, columns=list(required_columns | set(optional_columns)))
+        df = pd.read_parquet(
+            parquet_path, columns=list(required_columns | set(optional_columns))
+        )
 
         if dataset_col:
-            df["_dataset_id"] = pd.to_numeric(df[dataset_col], errors="coerce").astype("Int64")
+            df["_dataset_id"] = pd.to_numeric(df[dataset_col], errors="coerce").astype(
+                "Int64"
+            )
         else:
             try:
                 derived_dataset_id = int(parquet_path.stem)
@@ -89,20 +99,26 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
                 if derived_dataset_id is not None
                 else pd.Series(pd.NA, index=df.index, dtype="Int64")
             )
-        df["_target_id"] = pd.to_numeric(df[target_col], errors="coerce").astype("Int64")
+        df["_target_id"] = pd.to_numeric(df[target_col], errors="coerce").astype(
+            "Int64"
+        )
         df["_patch_id"] = pd.to_numeric(df[patch_col], errors="coerce").astype("Int64")
 
         dataset_ids.update(df["_dataset_id"].dropna().astype(int).unique())
         target_ids.update(df["_target_id"].dropna().astype(int).unique())
         patch_ids.update(df["_patch_id"].dropna().astype(int).unique())
 
-        valid_dt = df.dropna(subset=["_dataset_id", "_target_id"])[["_dataset_id", "_target_id"]].astype(int)
+        valid_dt = df.dropna(subset=["_dataset_id", "_target_id"])[
+            ["_dataset_id", "_target_id"]
+        ].astype(int)
         if not valid_dt.empty:
             building_ids.update(
                 f"{dataset:04d}_{target}" for dataset, target in valid_dt.to_numpy()
             )
 
-        valid_dp = df.dropna(subset=["_dataset_id", "_patch_id"])[["_dataset_id", "_patch_id"]].astype(int)
+        valid_dp = df.dropna(subset=["_dataset_id", "_patch_id"])[
+            ["_dataset_id", "_patch_id"]
+        ].astype(int)
         if not valid_dp.empty:
             streetview_image_ids.update(
                 f"{dataset:04d}_{patch}" for dataset, patch in valid_dp.to_numpy()
@@ -111,7 +127,9 @@ def count_unique_ids(files: Iterable[Path]) -> Dict[str, int]:
         if "building_id" in df.columns:
             building_ids.update(df["building_id"].dropna().astype(str).unique())
         if "streetview_image_id" in df.columns:
-            streetview_image_ids.update(df["streetview_image_id"].dropna().astype(str).unique())
+            streetview_image_ids.update(
+                df["streetview_image_id"].dropna().astype(str).unique()
+            )
 
     return {
         "dataset_id": len(dataset_ids),
@@ -129,7 +147,11 @@ def main() -> None:
     files = list(collect_parquet_files(args.intermediates_dir, args.glob))
 
     if not files:
-        logger.warning("No parquet files found under %s matching %s", args.intermediates_dir, args.glob)
+        logger.warning(
+            "No parquet files found under %s matching %s",
+            args.intermediates_dir,
+            args.glob,
+        )
         return
 
     counts = count_unique_ids(files)
@@ -143,4 +165,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
