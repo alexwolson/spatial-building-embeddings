@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
@@ -87,9 +88,8 @@ def _extract_positive_local_scales(
 class BuildingTable(NamedTuple):
     """Container for building-level arrays."""
 
+    target_coord_hashes: np.ndarray
     building_ids: np.ndarray
-    dataset_ids: np.ndarray
-    target_ids: np.ndarray
     lat_radians: np.ndarray
     lon_radians: np.ndarray
     lat_degrees: np.ndarray
@@ -136,10 +136,9 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
 
     required_columns = [
         "building_id",
-        "dataset_id",
-        "target_id",
         "target_lat",
         "target_lon",
+        "target_coord_hash",
     ]
     missing = [column for column in required_columns if column not in dataset.schema.names]
     if missing:
@@ -148,36 +147,44 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
     table = dataset.to_table(columns=required_columns)
 
     building_ids = table.column("building_id").to_numpy(zero_copy_only=False)
-    dataset_ids = table.column("dataset_id").to_numpy(zero_copy_only=False)
-    target_ids = table.column("target_id").to_numpy(zero_copy_only=False)
     lat_deg = table.column("target_lat").to_numpy(zero_copy_only=False)
     lon_deg = table.column("target_lon").to_numpy(zero_copy_only=False)
+    coord_hashes = table.column("target_coord_hash").to_numpy(zero_copy_only=False)
 
     lat_deg, lon_deg, valid_mask = validate_coords(lat_deg, lon_deg, logger)
     building_ids = building_ids[valid_mask]
-    dataset_ids = dataset_ids[valid_mask]
-    target_ids = target_ids[valid_mask]
+    coord_hashes = coord_hashes[valid_mask]
 
-    # Deduplicate by building_id, keeping the first occurrence (coords should match)
-    _, index = np.unique(building_ids, return_index=True)
-    dedup_indices = np.sort(index, kind="mergesort")
+    building_ids = building_ids.astype("U")
+    coord_hashes = coord_hashes.astype("U")
+
+    # Deduplicate by coordinate hash, selecting the lexicographically smallest building_id per coordinate.
+    sort_order = np.lexsort((building_ids, coord_hashes))
+    sorted_hashes = coord_hashes[sort_order]
+    dedup_mask = np.ones(sorted_hashes.shape[0], dtype=bool)
+    dedup_mask[1:] = sorted_hashes[1:] != sorted_hashes[:-1]
+    dedup_indices = sort_order[dedup_mask]
+
     logger.info(
-        "Retained %d unique buildings out of %d rows",
+        "Retained %d unique coordinate hashes out of %d valid rows",
         len(dedup_indices),
-        len(building_ids),
+        len(coord_hashes),
     )
 
+    if len(dedup_indices) < len(coord_hashes):
+        logger.info(
+            "Removed %d duplicate coordinate entries",
+            len(coord_hashes) - len(dedup_indices),
+        )
+
     building_ids = building_ids[dedup_indices]
-    dataset_ids = dataset_ids[dedup_indices]
-    target_ids = target_ids[dedup_indices]
     lat_deg = lat_deg[dedup_indices]
     lon_deg = lon_deg[dedup_indices]
 
-    order = np.argsort(building_ids.astype("U"))
+    order = np.lexsort((building_ids, coord_hashes))
 
+    coord_hashes = coord_hashes[order].astype("U")
     building_ids = building_ids[order].astype("U")
-    dataset_ids = dataset_ids[order].astype(np.int64, copy=False)
-    target_ids = target_ids[order].astype(np.int64, copy=False)
     lat_deg = lat_deg[order]
     lon_deg = lon_deg[order]
 
@@ -185,9 +192,8 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
     lon_rad = np.deg2rad(lon_deg)
 
     return BuildingTable(
+        target_coord_hashes=coord_hashes,
         building_ids=building_ids,
-        dataset_ids=dataset_ids,
-        target_ids=target_ids,
         lat_radians=lat_rad,
         lon_radians=lon_rad,
         lat_degrees=lat_deg,
@@ -286,60 +292,31 @@ def write_parquet(
     distance_dtype: str,
     metadata: dict[str, str],
 ) -> None:
-    """Write the difficulty metadata parquet file."""
+    """Write the difficulty metadata parquet file using a DataFrame workflow."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     dtype_np = np.float32 if distance_dtype == "float32" else np.float64
+    neighbor_ids = buildings.building_ids[neighbour_indices]
     neighbor_distances = neighbour_distances.astype(dtype_np, copy=False)
-    total_rows = neighbour_indices.shape[0]
 
-    distance_value_type = pa.float32() if distance_dtype == "float32" else pa.float64()
-
-    schema = pa.schema(
-        [
-            pa.field("building_id", pa.string(), nullable=False),
-            pa.field("dataset_id", pa.int32(), nullable=False),
-            pa.field("target_id", pa.int64(), nullable=False),
-            pa.field("target_lat", pa.float64(), nullable=False),
-            pa.field("target_lon", pa.float64(), nullable=False),
-            pa.field("neighbor_building_ids", pa.list_(pa.string()), nullable=False),
-            pa.field("neighbor_distances_meters", pa.list_(distance_value_type), nullable=False),
-            pa.field("neighbor_bands", pa.list_(pa.int16()), nullable=False),
-        ]
+    df = pd.DataFrame(
+        {
+            "target_coord_hash": buildings.target_coord_hashes,
+            "target_lat": buildings.lat_degrees,
+            "target_lon": buildings.lon_degrees,
+            "neighbor_building_ids": neighbor_ids.tolist(),
+            "neighbor_distances_meters": neighbor_distances.tolist(),
+            "neighbor_bands": bands.tolist(),
+        }
     )
 
-    encoded_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
-
-    with pq.ParquetWriter(output_path, schema=schema, compression="snappy") as writer:
-        for start in range(0, total_rows, row_group_size):
-            end = min(start + row_group_size, total_rows)
-
-            batch_neighbor_ids = buildings.building_ids[neighbour_indices[start:end]]
-            batch_neighbor_distances = neighbour_distances[start:end].astype(dtype_np, copy=False)
-            batch_bands = bands[start:end]
-
-            arrays = [
-                pa.array(buildings.building_ids[start:end]),
-                pa.array(buildings.dataset_ids[start:end].astype(np.int32, copy=False)),
-                pa.array(buildings.target_ids[start:end]),
-                pa.array(buildings.lat_degrees[start:end]),
-                pa.array(buildings.lon_degrees[start:end]),
-                pa.array(batch_neighbor_ids.tolist(), type=pa.list_(pa.string())),
-                pa.array(batch_neighbor_distances.tolist(), type=pa.list_(distance_value_type)),
-                pa.array(batch_bands.tolist(), type=pa.list_(pa.int16())),
-            ]
-
-            table = pa.Table.from_arrays(arrays, schema=schema)
-            if start == 0 and encoded_metadata:
-                existing_metadata = table.schema.metadata or {}
-                merged_metadata = {**existing_metadata, **encoded_metadata}
-                table = table.replace_schema_metadata(merged_metadata)
-            writer.write_table(table)
-
+    table = pa.Table.from_pandas(df, preserve_index=False)
     if metadata:
-        table_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
-        with pq.ParquetFile(output_path, metadata=table_metadata):
-            pass
+        encoded_metadata = {key.encode("utf-8"): value.encode("utf-8") for key, value in metadata.items()}
+        existing_metadata = table.schema.metadata or {}
+        table = table.replace_schema_metadata({**existing_metadata, **encoded_metadata})
+
+    pq.write_table(table, output_path, compression="snappy", row_group_size=row_group_size)
 
 
 def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
@@ -440,4 +417,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

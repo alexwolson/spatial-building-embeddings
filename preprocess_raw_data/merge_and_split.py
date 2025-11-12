@@ -20,6 +20,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from preprocess_raw_data.config import MergeAndSplitConfig, load_config_from_file
+from pandas.util import hash_pandas_object
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
@@ -109,6 +110,34 @@ def ensure_building_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
 
     return enriched_df
+
+
+def add_coordinate_hash(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
+    """
+    Compute a short hash for each (target_lat, target_lon) pair.
+
+    This enables downstream deduplication by exact coordinate rather than building_id.
+    """
+    required_columns = {"target_lat", "target_lon"}
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Missing required coordinate columns for hashing: {', '.join(sorted(missing))}"
+        )
+
+    hash_source = df[["target_lat", "target_lon"]]
+    hash_values = hash_pandas_object(hash_source, index=False, categorize=False)
+    hash_strings = hash_values.map(lambda value: format(int(value), "016x"))
+    df = df.copy()
+    df["target_coord_hash"] = hash_strings.astype("string")
+
+    unique_coords = df["target_coord_hash"].nunique(dropna=False)
+    logger.info(
+        "Computed coordinate hashes for %s rows (%s unique lat/lon pairs)",
+        f"{len(df):,}",
+        f"{unique_coords:,}",
+    )
+    return df
 
 
 def ensure_dataset_id(df: pd.DataFrame, logger: logging.Logger, *, source: Path | None = None) -> pd.DataFrame:
@@ -381,6 +410,7 @@ def merge_and_split(
     # Ensure dataset identifiers exist before composing building-aware identifiers
     df = ensure_dataset_id(df, logger)
     df = ensure_building_identifiers(df)
+    df = add_coordinate_hash(df, logger)
 
     # Filter singleton targets
     logger.info("Filtering singleton building_ids...")
@@ -498,4 +528,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
