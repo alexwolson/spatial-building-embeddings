@@ -39,7 +39,6 @@ seed = 42
 # Checkpointing and validation cadence
 save_every_n_epochs = 5
 validate_every_n_epochs = 1
-resume_from_checkpoint = null
 
 # Logging
 log_file = "/home/awolson/scratch/spatial-building-embeddings/logs/triplet_training.log"
