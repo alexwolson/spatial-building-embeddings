@@ -31,31 +31,32 @@ from train_specialized_embeddings.model import EmbeddingProjector, TripletLossWr
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
-    """Set up logging with Rich handler."""
+    """Set up logging with Rich handlers for console (always) and optional file."""
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
 
     # Remove existing handlers
     logger.handlers.clear()
 
-    # Create Rich handler
+    # Console handler (always attach so logs appear in stdout/stderr)
+    console_handler = RichHandler(rich_tracebacks=True, show_path=False)
+    console_handler.setFormatter(logging.Formatter("%(message)s", datefmt="[%X]"))
+    logger.addHandler(console_handler)
+
+    # Optional file handler
     if log_file:
         log_file = Path(log_file)
         log_file.parent.mkdir(parents=True, exist_ok=True)
         log_file_handle = open(log_file, "w", encoding="utf-8")
-        # When writing to file, use file-aware console
-        handler = RichHandler(
-            console=Console(file=log_file_handle),
+        file_console = Console(file=log_file_handle)
+        file_handler = RichHandler(
+            console=file_console,
             rich_tracebacks=True,
             show_path=False,
         )
-        # Keep reference so handle stays open
-        handler.log_file_handle = log_file_handle  # type: ignore[attr-defined]
-    else:
-        handler = RichHandler(rich_tracebacks=True, show_path=False)
-
-    handler.setFormatter(logging.Formatter("%(message)s", datefmt="[%X]"))
-    logger.addHandler(handler)
+        file_handler.setFormatter(logging.Formatter("%(message)s", datefmt="[%X]"))
+        file_handler.log_file_handle = log_file_handle  # type: ignore[attr-defined]
+        logger.addHandler(file_handler)
 
     return logger
 
