@@ -148,9 +148,11 @@ class TripletDataset(Dataset):
             coord_hash = str(row["target_coord_hash"])
             if coord_hash in coord_hash_to_building:
                 building_id = coord_hash_to_building[coord_hash]
-                neighbors = row["neighbor_building_ids"]
-                bands = row["neighbor_bands"]
-                distances = row.get("neighbor_distances_meters", [0.0] * len(neighbors))
+                neighbors = self._ensure_sequence(row["neighbor_building_ids"])
+                bands = self._ensure_sequence(row["neighbor_bands"])
+                distances = self._ensure_sequence(
+                    row.get("neighbor_distances_meters", [0.0] * len(neighbors))
+                )
 
                 self.building_to_neighbors[building_id] = neighbors
                 self.building_to_bands[building_id] = bands
@@ -202,10 +204,10 @@ class TripletDataset(Dataset):
             Tuple of (negative_idx, difficulty_band)
         """
         # Get neighbors and bands for this building
-        neighbors = self.building_to_neighbors.get(anchor_building_id, [])
-        bands = self.building_to_bands.get(anchor_building_id, [])
+        neighbors = self._ensure_sequence(self.building_to_neighbors.get(anchor_building_id))
+        bands = self._ensure_sequence(self.building_to_bands.get(anchor_building_id))
 
-        if not neighbors or not bands:
+        if len(neighbors) == 0 or len(bands) == 0:
             # Fallback: sample random building that's not the anchor
             all_buildings = list(self.valid_buildings.keys())
             other_buildings = [b for b in all_buildings if b != anchor_building_id]
@@ -255,6 +257,21 @@ class TripletDataset(Dataset):
     def update_ucb_reward(self, difficulty_band: int, reward: float):
         """Update UCB sampler with reward for a difficulty band."""
         self.ucb_sampler.update_reward(difficulty_band, reward)
+
+    @staticmethod
+    def _ensure_sequence(value):
+        """Normalize metadata fields that may arrive as numpy arrays or scalars."""
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, pd.Series):
+            return value.tolist()
+        return [value]
 
 
 class UCBDifficultySampler:
@@ -340,4 +357,3 @@ class UCBDifficultySampler:
             "band_counts": dict(self.band_counts),
             "band_means": dict(self.band_means),
         }
-
