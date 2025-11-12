@@ -336,6 +336,7 @@ def train(config: TripletTrainingConfig) -> int:
     best_val_loss = float("inf")
     global_step = 0
     val_metrics = {"val_loss": float("inf")}  # Initialize with default value
+    first_iteration_logged = False
 
     for epoch in range(start_epoch, config.num_epochs):
         model.train()
@@ -359,10 +360,42 @@ def train(config: TripletTrainingConfig) -> int:
                 negative = batch["negative"].to(device)
                 bands = batch["band"].to(device)
 
+                if not first_iteration_logged:
+                    logger.info("First iteration diagnostics:")
+                    logger.info(
+                        "  epoch=%d/%d, batch_idx=%d, global_step=%d",
+                        epoch + 1,
+                        config.num_epochs,
+                        batch_idx,
+                        global_step + 1,
+                    )
+                    logger.info(
+                        "  anchor_shape=%s, positive_shape=%s, negative_shape=%s, bands_shape=%s",
+                        tuple(anchor.shape),
+                        tuple(positive.shape),
+                        tuple(negative.shape),
+                        tuple(bands.shape),
+                    )
+                    bands_cpu = bands.detach().cpu()
+                    if bands_cpu.numel() > 0:
+                        preview = bands_cpu.tolist()
+                        if bands_cpu.numel() > 10:
+                            preview = preview[:10] + ["..."]
+                        logger.info("  band_samples=%s", preview)
+
                 # Forward pass
                 anchor_proj = model(anchor)
                 positive_proj = model(positive)
                 negative_proj = model(negative)
+
+                if not first_iteration_logged:
+                    anchor_proj_sample = anchor_proj[0].detach().cpu().tolist()[:5]
+                    logger.info(
+                        "  anchor_projection_sample(first 5)=%s",
+                        anchor_proj_sample,
+                    )
+                    logger.info("  loss_value=%.6f", loss_fn(anchor_proj[:1], positive_proj[:1], negative_proj[:1]).item())
+                    first_iteration_logged = True
 
                 # Compute loss
                 loss = loss_fn(anchor_proj, positive_proj, negative_proj)
