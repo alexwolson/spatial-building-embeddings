@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from rich.console import Console
 from rich.logging import RichHandler
 from torch.utils.data import DataLoader
@@ -142,6 +143,8 @@ def validate(
     model.eval()
     total_loss = 0.0
     num_batches = 0
+    violation_count = 0
+    total_triplets = 0
 
     with torch.no_grad():
         for _ in range(min(num_samples, len(val_dataset))):
@@ -162,14 +165,32 @@ def validate(
             loss = loss_fn(anchor_proj, positive_proj, negative_proj)
             total_loss += loss.item()
             num_batches += 1
+            total_triplets += 1
+
+            # Margin violation: pos distance + margin > neg distance
+            if loss_fn.distance == "euclidean":
+                pos_dist = torch.norm(anchor_proj - positive_proj, p=2, dim=1)
+                neg_dist = torch.norm(anchor_proj - negative_proj, p=2, dim=1)
+            else:  # cosine distance (1 - cosine similarity)
+                pos_dist = 1 - F.cosine_similarity(anchor_proj, positive_proj)
+                neg_dist = 1 - F.cosine_similarity(anchor_proj, negative_proj)
+
+            if (pos_dist + loss_fn.margin > neg_dist).item():
+                violation_count += 1
 
     avg_loss = total_loss / num_batches if num_batches > 0 else float("inf")
+    violation_rate = violation_count / total_triplets if total_triplets > 0 else float("nan")
 
     metrics = {
         "val_loss": avg_loss,
+        "margin_violation_rate": violation_rate,
     }
 
-    logger.info(f"Validation loss: {avg_loss:.6f}")
+    logger.info(
+        "Validation loss: %.6f, Margin violation rate: %.4f",
+        avg_loss,
+        violation_rate,
+    )
 
     return metrics
 
@@ -349,7 +370,7 @@ def train(config: TripletTrainingConfig) -> int:
 
         epoch_start_time = time.time()
 
-            for batch_idx, batch in enumerate(train_loader):
+        for __builtins__, batch in enumerate(train_loader):
             anchor = batch["anchor"].to(device)
             positive = batch["positive"].to(device)
             negative = batch["negative"].to(device)
