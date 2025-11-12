@@ -181,7 +181,7 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
     lat_deg = lat_deg[dedup_indices]
     lon_deg = lon_deg[dedup_indices]
 
-    order = np.lexsort((building_ids, coord_hashes))
+    order = np.argsort(coord_hashes, kind="mergesort")
 
     coord_hashes = coord_hashes[order].astype("U")
     building_ids = building_ids[order].astype("U")
