@@ -30,6 +30,7 @@ from difficulty_metadata.config import DifficultyMetadataConfig, load_config_fro
 
 EARTH_RADIUS_METERS = 6_371_008.8
 MIN_CALIBRATION_SAMPLE = 10_000
+FULL_DATASET_CALIBRATION_THRESHOLD = 250_000
 CALIBRATION_PERCENTILES = np.array([5, 10, 20, 40, 60, 85], dtype=np.float64)
 RNG_SEED = 42
 
@@ -260,11 +261,18 @@ def calibrate_band_edges(
     if total == 0:
         raise ValueError("No anchors available for calibration.")
 
-    sample_size = max(int(math.ceil(total * sample_fraction)), MIN_CALIBRATION_SAMPLE)
-    sample_size = min(sample_size, total)
-    logger.info("Sampling %d anchors (%.2f%%) for band calibration", sample_size, (sample_size / total) * 100)
-
-    sample_indices = rng.choice(total, size=sample_size, replace=False)
+    if total <= FULL_DATASET_CALIBRATION_THRESHOLD:
+        sample_indices = np.arange(total, dtype=np.int64)
+        logger.info(
+            "Using all %d anchors for band calibration (<= %d threshold)",
+            total,
+            FULL_DATASET_CALIBRATION_THRESHOLD,
+        )
+    else:
+        sample_size = max(int(math.ceil(total * sample_fraction)), MIN_CALIBRATION_SAMPLE)
+        sample_size = min(sample_size, total)
+        logger.info("Sampling %d anchors (%.2f%%) for band calibration", sample_size, (sample_size / total) * 100)
+        sample_indices = rng.choice(total, size=sample_size, replace=False)
     sampled_distances = distances[sample_indices].astype(np.float64, copy=False)
 
     local_scales = _extract_positive_local_scales(sampled_distances, k0, logger=logger)
