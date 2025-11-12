@@ -78,12 +78,11 @@ class TripletDataset(Dataset):
         for idx, building_id in enumerate(self.building_ids):
             self.building_to_indices[building_id].append(idx)
 
-        # Filter out buildings with only one image (can't form triplets)
-        self.valid_buildings = {
-            bid: indices
-            for bid, indices in self.building_to_indices.items()
-            if len(indices) > 1
-        }
+        # Filter out buildings with only one image (can't form triplets) and cache index arrays
+        self.valid_buildings: dict[str, np.ndarray] = {}
+        for bid, indices in self.building_to_indices.items():
+            if len(indices) > 1:
+                self.valid_buildings[bid] = np.asarray(indices, dtype=np.int64)
 
         logger.info(
             f"Loaded {len(self.embeddings)} embeddings from {len(self.building_to_indices)} buildings "
@@ -92,7 +91,9 @@ class TripletDataset(Dataset):
 
         # Pre-compute valid building ids list for sampling
         self.valid_building_ids = list(self.valid_buildings.keys())
-        self.total_anchor_candidates = sum(len(indices) for indices in self.valid_buildings.values())
+        self.valid_building_ids_array = np.asarray(self.valid_building_ids, dtype=object)
+        self.num_valid_buildings = len(self.valid_building_ids)
+        self.total_anchor_candidates = sum(indices.size for indices in self.valid_buildings.values())
         if self.total_anchor_candidates == 0:
             raise ValueError("No buildings with at least two images available for triplet sampling.")
 
@@ -172,11 +173,14 @@ class TripletDataset(Dataset):
             TripletSample with anchor, positive, negative embeddings and difficulty band
         """
         # Sample a random building
-        building_id = np.random.choice(self.valid_building_ids)
+        building_idx = np.random.randint(self.num_valid_buildings)
+        building_id = str(self.valid_building_ids_array[building_idx])
         building_indices = self.valid_buildings[building_id]
 
         # Sample anchor and positive from same building
         anchor_idx, positive_idx = np.random.choice(building_indices, size=2, replace=False)
+        anchor_idx = int(anchor_idx)
+        positive_idx = int(positive_idx)
 
         # Sample negative using UCB-guided difficulty band selection
         negative_idx, difficulty_band = self._sample_negative(building_id)
@@ -209,15 +213,9 @@ class TripletDataset(Dataset):
 
         if len(neighbors) == 0 or len(bands) == 0:
             # Fallback: sample random building that's not the anchor
-            all_buildings = list(self.valid_buildings.keys())
-            other_buildings = [b for b in all_buildings if b != anchor_building_id]
-            if not other_buildings:
-                # Last resort: use any building
-                other_buildings = all_buildings
-
-            negative_building_id = np.random.choice(other_buildings)
+            negative_building_id = self._random_building_id(exclude_id=anchor_building_id)
             negative_indices = self.valid_buildings[negative_building_id]
-            negative_idx = np.random.choice(negative_indices)
+            negative_idx = int(np.random.choice(negative_indices))
             return negative_idx, -1  # Unknown band (fallback)
 
         # Group neighbors by difficulty band
@@ -240,19 +238,31 @@ class TripletDataset(Dataset):
         valid_candidates = [c for c in candidates if c in self.valid_buildings]
         if not valid_candidates:
             # Fallback: sample any other building
-            all_buildings = list(self.valid_buildings.keys())
-            other_buildings = [b for b in all_buildings if b != anchor_building_id]
-            if not other_buildings:
-                other_buildings = all_buildings
-            negative_building_id = np.random.choice(other_buildings)
+            negative_building_id = self._random_building_id(exclude_id=anchor_building_id)
             used_selected_band = False
         else:
             negative_building_id = np.random.choice(valid_candidates)
 
         negative_indices = self.valid_buildings[negative_building_id]
-        negative_idx = np.random.choice(negative_indices)
+        negative_idx = int(np.random.choice(negative_indices))
 
         return negative_idx, selected_band if used_selected_band else -1
+
+    def _random_building_id(self, exclude_id: str | None = None) -> str:
+        """Sample a random building id, optionally excluding one."""
+        if self.num_valid_buildings == 0:
+            raise ValueError("No valid buildings available for sampling.")
+
+        if exclude_id is None or self.num_valid_buildings == 1:
+            idx = np.random.randint(self.num_valid_buildings)
+            return str(self.valid_building_ids_array[idx])
+
+        # Retry until we pull a different building id. With many buildings this is cheap.
+        while True:
+            idx = np.random.randint(self.num_valid_buildings)
+            candidate = str(self.valid_building_ids_array[idx])
+            if candidate != exclude_id:
+                return candidate
 
     def update_ucb_reward(self, difficulty_band: int, reward: float):
         """Update UCB sampler with reward for a difficulty band."""
