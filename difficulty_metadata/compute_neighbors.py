@@ -178,6 +178,7 @@ def load_buildings(dataset_path: Path, logger: logging.Logger) -> BuildingTable:
         )
 
     building_ids = building_ids[dedup_indices]
+    coord_hashes = coord_hashes[dedup_indices]
     lat_deg = lat_deg[dedup_indices]
     lon_deg = lon_deg[dedup_indices]
 
