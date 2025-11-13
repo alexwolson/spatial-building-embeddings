@@ -105,11 +105,8 @@ class TripletDataset(Dataset):
                 "No buildings with at least two images available for triplet sampling."
             )
 
-        # Determine epoch length from config
-        self.samples_per_epoch = min(
-            config.samples_per_epoch, self.total_anchor_candidates
-        )
-        self.samples_per_epoch = max(1, self.samples_per_epoch)
+        # Determine epoch length: use full set of anchor candidates
+        self.samples_per_epoch = self.total_anchor_candidates
 
         # Build difficulty metadata index
         # Map building_id to coordinate hash for matching with difficulty metadata

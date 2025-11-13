@@ -25,7 +25,6 @@ learning_rate = 0.0001   # Learning rate (1e-4)
 weight_decay = 0.00001   # Weight decay for optimizer (1e-5)
 margin = 0.5             # Triplet loss margin
 loss_distance = "euclidean"  # Distance metric: "euclidean" or "cosine"
-samples_per_epoch = 250000   # Maximum triplet samples drawn per epoch
 
 # UCB sampler configuration
 ucb_exploration_constant = 2.0    # UCB exploration constant (c)

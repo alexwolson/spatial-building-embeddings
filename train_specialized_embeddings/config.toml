@@ -27,7 +27,6 @@ learning_rate = 0.0001
 weight_decay = 0.00001
 margin = 0.5
 loss_distance = "euclidean"
-samples_per_epoch = 2000000
 
 # UCB sampler configuration
 ucb_exploration_constant = 2.0

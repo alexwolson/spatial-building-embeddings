@@ -73,10 +73,6 @@ class TripletTrainingConfig(BaseSettings):
     loss_distance: Literal["euclidean", "cosine"] = Field(
         "euclidean", description="Distance metric for triplet loss"
     )
-    samples_per_epoch: PositiveInt = Field(
-        250_000,
-        description="Maximum number of triplet samples drawn per epoch",
-    )
 
     # UCB sampler configuration
     ucb_exploration_constant: float = Field(

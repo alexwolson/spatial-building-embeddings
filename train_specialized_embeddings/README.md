@@ -119,7 +119,7 @@ See `config.example.toml` for a complete example configuration file. All hyperpa
 - `weight_decay`: Weight decay (default: 1e-5)
 - `margin`: Triplet loss margin (default: 0.5)
 - `loss_distance`: Distance metric: "euclidean" or "cosine" (default: "euclidean")
-- `samples_per_epoch`: Maximum number of triplet samples drawn per epoch (default: 250k)
+- Epoch length now always covers every valid anchor candidate once per epoch.
 
 **UCB Sampler:**
 - `ucb_exploration_constant`: UCB exploration constant c (default: 2.0)
