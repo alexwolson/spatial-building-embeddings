@@ -206,6 +206,127 @@ def validate(
     return metrics
 
 
+def compute_retrieval_metrics(
+    model: nn.Module,
+    val_dataset: TripletDataset,
+    device: torch.device,
+    logger: logging.Logger,
+    top_k: tuple[int, ...] = (1, 5, 10),
+    max_queries: int = 512,
+    per_building_limit: int = 4,
+) -> dict[str, float]:
+    """
+    Compute building retrieval Recall@K on the validation split.
+
+    This metric only depends on the learned embeddings and labels, making it
+    stable across different hyperparameter choices (e.g., margin, loss type).
+    """
+    if len(val_dataset.building_ids) == 0:
+        logger.warning("Validation dataset has no entries; skipping retrieval metric.")
+        return {f"retrieval_recall@{k}": float("nan") for k in top_k}
+
+    # Select candidate indices (buildings with >=2 samples so retrieval is meaningful)
+    eligible_indices: list[int] = []
+    for building_id, indices in val_dataset.building_to_indices.items():
+        if len(indices) < 2:
+            continue
+        if per_building_limit > 0:
+            eligible_indices.extend(indices[:per_building_limit])
+        else:
+            eligible_indices.extend(indices)
+
+    if not eligible_indices:
+        logger.warning(
+            "Retrieval metric skipped: no buildings with at least two samples available."
+        )
+        return {
+            f"retrieval_recall@{k}": float("nan")
+            for k in top_k
+        }
+
+    eligible_array = np.array(eligible_indices, dtype=np.int64)
+    rng = np.random.default_rng(0)
+    rng.shuffle(eligible_array)
+    if max_queries > 0 and eligible_array.size > max_queries:
+        eligible_array = eligible_array[:max_queries]
+
+    num_embeddings = val_dataset.embeddings.size(0)
+    if num_embeddings <= 1:
+        logger.warning("Retrieval metric skipped: not enough validation embeddings.")
+        return {
+            f"retrieval_recall@{k}": float("nan")
+            for k in top_k
+        }
+
+    # Project all validation embeddings once.
+    model.eval()
+    projected_chunks: list[torch.Tensor] = []
+    projection_batch_size = 4096
+    with torch.no_grad():
+        for start in range(0, num_embeddings, projection_batch_size):
+            batch = val_dataset.embeddings[start : start + projection_batch_size].to(
+                device
+            )
+            projected_batch = model(batch).cpu()
+            projected_chunks.append(projected_batch)
+    projected_embeddings = torch.cat(projected_chunks, dim=0)
+
+    building_ids = val_dataset.building_ids
+    sorted_top_k = tuple(sorted(set(top_k)))
+    max_k = min(sorted_top_k[-1], num_embeddings - 1)
+    if max_k <= 0:
+        logger.warning(
+            "Retrieval metric skipped: not enough candidates after removing the query entry."
+        )
+        return {
+            f"retrieval_recall@{k}": float("nan")
+            for k in top_k
+        }
+
+    hits = {k: 0 for k in sorted_top_k}
+    total_queries = 0
+
+    for query_idx in eligible_array.tolist():
+        total_queries += 1
+        query_vec = projected_embeddings[query_idx]
+        similarities = torch.matmul(projected_embeddings, query_vec)
+        similarities[query_idx] = float("-inf")  # exclude the query itself
+
+        topk_indices = torch.topk(similarities, k=max_k).indices.tolist()
+        neighbor_buildings = [building_ids[idx] for idx in topk_indices]
+        query_building = building_ids[query_idx]
+
+        for k in sorted_top_k:
+            effective_k = min(k, max_k)
+            if effective_k == 0:
+                continue
+            top_neighbors = neighbor_buildings[:effective_k]
+            if query_building in top_neighbors:
+                hits[k] += 1
+
+    if total_queries == 0:
+        logger.warning("Retrieval metric skipped: no eligible validation queries.")
+        return {
+            f"retrieval_recall@{k}": float("nan")
+            for k in top_k
+        }
+
+    metrics = {
+        f"retrieval_recall@{k}": hits[k] / total_queries
+        for k in sorted_top_k
+    }
+    metrics["retrieval_query_count"] = float(total_queries)
+
+    logger.info(
+        "Retrieval recall: "
+        + ", ".join(
+            f"@{k}={metrics[f'retrieval_recall@{k}']:.4f}" for k in sorted_top_k
+        )
+        + f" (queries={total_queries})"
+    )
+    return metrics
+
+
 def save_checkpoint(
     model: nn.Module,
     optimizer: torch.optim.Optimizer,
@@ -503,6 +624,17 @@ def train(config: TripletTrainingConfig) -> int:
                     pin_memory=config.pin_memory,
                 )
                 val_loss = val_metrics["val_loss"]
+
+                retrieval_metrics = compute_retrieval_metrics(
+                    model,
+                    val_dataset,
+                    device,
+                    logger,
+                    config.retrieval_metric_top_k,
+                    config.retrieval_metric_max_queries,
+                    config.retrieval_metric_per_building_limit,
+                )
+                val_metrics.update(retrieval_metrics)
 
                 if wandb_run:
                     val_log = {f"val/{k}": v for k, v in val_metrics.items()}

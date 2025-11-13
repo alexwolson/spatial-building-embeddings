@@ -1,23 +1,19 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The repository centres on a two-stage data pipeline. `download_raw_data/` holds the aria2-based fetch script and usage notes; `preprocess_raw_data/` contains per-tar processors, merge tools, and SLURM launchers. Keep bulky artifacts in `data/raw/` (source tars) and `data/intermediates/` (per-tar parquet outputs); these paths are `.gitignore`d on purpose. Root-level files (`pyproject.toml`, `uv.lock`) fix dependency versions for Python 3.11.
+Core workflows live in task-focused packages: `preprocess_raw_data/` normalizes tar shards, merges parquet intermediates, and writes `data/merged/`; `generate_embeddings/` houses the DINOv2 inference driver; `difficulty_metadata/` computes BallTree difficulty bands; `train_specialized_embeddings/` runs the triplet-loss trainer. Shared assets sit in `download_raw_data/` (ingest helpers), `data/raw|intermediates|merged|difficulty/` (artifacts), and mirrored `slurm/` folders for Alliance batch jobs.
 
 ## Build, Test, and Development Commands
-- `uv sync` – create/refresh the managed virtual environment and install declared dependencies.
-- `source .venv/bin/activate` – activate the environment created by `uv`.
-- `python preprocess_raw_data/process_tar.py --help` – review flags for extracting, validating, and logging a single tar run.
-- `python preprocess_raw_data/merge_and_split.py --help` – inspect options for combining intermediates and writing deterministic splits.
-- `./download_raw_data/download.sh <output_dir>` – download upstream archives (requires `aria2c` in PATH).
+Install or refresh the environment with `uv sync` (Python 3.11). Run preprocessing with `uv run python preprocess_raw_data/process_tar.py --config preprocess_raw_data/config.example.toml` followed by `merge_and_split.py` to materialize splits. Generate embeddings for a shard via `uv run python generate_embeddings/generate_embeddings.py --config <config.toml>` on a GPU-enabled host. Train the projection head with `uv run python train_specialized_embeddings/train.py --config train_specialized_embeddings/config.toml`. Cluster wrappers simply pass these configs into `slurm/submit_*.sh`.
 
 ## Coding Style & Naming Conventions
-Stick to PEP 8 with 4-space indentation and descriptive `snake_case`. Maintain module docstrings, type hints, and `NamedTuple`/dataclass wrappers to document schema expectations. Prefer `pathlib.Path`, `argparse`, and the existing `setup_logging` helpers instead of ad-hoc prints. Script filenames follow a `verb_subject.py` pattern—match it for new CLIs.
+All new Python should be type-annotated, 4-space indented, and formatted with Black (`uv run black .`). Keep modules narrowly scoped and prefer `snake_case` for files, variables, and config keys; environment variables inherit the existing prefixes (e.g., `TRIPLET_TRAINING_`, `GENERATE_EMBEDDINGS_`). Reuse Rich logging helpers and fail fast when external resources (GPU, Arrow module, tar files) are missing.
 
 ## Testing Guidelines
-No automated suite exists yet; adopt `pytest` for any new tests. Place them under `tests/`, mirroring the source structure (e.g., `tests/test_process_tar.py`), and name functions `test_<condition>`. Use lightweight fixtures stored in `tests/fixtures/` to simulate tar metadata or image files, keeping large binaries out of Git. Target edge cases the pipeline already guards against: corrupt images, missing `d` lines, duplicate target IDs. Run `pytest` locally and note manual script runs in the PR body when integration validation is needed.
+There is no central pytest suite yet, so add lightweight validators near the code you touch (schema checks, metric asserts) and gate them behind `if __name__ == "__main__":`. Before submitting, run the exact command(s) your change affects against a small sample parquet/tar pair in `data/intermediates/` and confirm derived artifacts land in the expected `data/*` directory. For numerical work, log summary metrics (count, mean, std) so reviewers can spot regressions without full reruns.
 
 ## Commit & Pull Request Guidelines
-History uses short, imperative titles (“Update python requirements”), so follow that convention and scope commits narrowly. PRs should summarise intent, call out testing evidence (`pytest`, sample CLI invocations), and link issues or job IDs when applicable. Attach screenshots or log snippets for changes that affect monitoring dashboards, and mention any data reprocessing steps reviewers must repeat.
+Commits follow short, imperative summaries (`Add CI guard`, `Simplify wandb config`). Group related changes and avoid drive-by refactors. Every PR should describe the scenario, list reproducible commands (inputs plus config paths), mention any non-default resources (GPU type, Arrow module), and link to issues or benchmarks. Include screenshots or log excerpts when altering monitoring output, and ensure SLURM scripts remain executable (`chmod +x`) before review.
 
-## Data & Job Orchestration Tips
-Keep raw archives and generated parquet files out of Git; stage them in the `data/` tree or external storage. For cluster workloads, extend the SLURM scripts in `preprocess_raw_data/slurm/` and document new parameters alongside the script. Use `tempfile.TemporaryDirectory()` or scratch paths for transient extraction to avoid filling shared disks. Manage secrets through environment variables or cluster secret stores—never commit credentials.
+## Security & Configuration Tips
+Never hard-code Hugging Face or Weights & Biases tokens; rely on environment variables loaded by the SLURM wrappers. PyArrow comes from the cluster’s Arrow module, so keep it out of `pyproject.toml`. When handling tarballs, assume they may be corrupted: validate paths with `_normalize_relative_path` and keep writes scoped to `data/` to avoid leaks outside the workspace.

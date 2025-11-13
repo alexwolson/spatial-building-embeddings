@@ -96,6 +96,20 @@ class TripletTrainingConfig(BaseSettings):
         ge=0,
         description="Number of validations with no improvement before stopping (0 disables early stopping)",
     )
+    retrieval_metric_top_k: tuple[int, ...] = Field(
+        (1, 5, 10),
+        description="Top-k values to report for the retrieval metric",
+    )
+    retrieval_metric_max_queries: int = Field(
+        512,
+        ge=1,
+        description="Maximum number of validation exemplars used when computing retrieval metrics",
+    )
+    retrieval_metric_per_building_limit: int = Field(
+        4,
+        ge=0,
+        description="Cap on how many samples to draw per building when evaluating retrieval (0 disables the cap)",
+    )
 
     # Logging
     log_file: Path | None = Field(None, description="Optional log file path")
