@@ -245,6 +245,21 @@ if [ -z "${STORAGE_URL}" ]; then
         STORAGE_PATH="${PROJECT_ROOT}/train_specialized_embeddings/optuna/optuna.db"
     fi
     STORAGE_PATH="$(resolve_abs_path "${STORAGE_PATH}")"
+    if [ -e "${STORAGE_PATH}" ]; then
+        warning "Existing Optuna database detected at ${STORAGE_PATH}"
+        TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
+        STORAGE_BASENAME="${STORAGE_PATH##*/}"
+        STORAGE_DIRNAME="$(dirname "${STORAGE_PATH}")"
+        if [[ "${STORAGE_BASENAME}" == *.* ]]; then
+            STORAGE_NAME="${STORAGE_BASENAME%.*}"
+            STORAGE_EXT=".${STORAGE_BASENAME##*.}"
+        else
+            STORAGE_NAME="${STORAGE_BASENAME}"
+            STORAGE_EXT=""
+        fi
+        STORAGE_PATH="${STORAGE_DIRNAME}/${STORAGE_NAME}_${TIMESTAMP}${STORAGE_EXT}"
+        warning "Optuna database will be written to new path: ${STORAGE_PATH}"
+    fi
     mkdir -p "$(dirname "${STORAGE_PATH}")"
     touch "${STORAGE_PATH}"
     STORAGE_URL="sqlite:///${STORAGE_PATH}"
