@@ -238,10 +238,7 @@ if [ "${NO_VENV}" = false ]; then
                 pip install uv || error_exit "Failed to install uv" 4
             fi
             cd "${PROJECT_ROOT}"
-            # Use Alliance wheelhouse directories if available (same as pip does)
-            WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-            uv pip install -e . --find-links="${WHEELHOUSE_DIRS}" || error_exit "Failed to reinstall dependencies" 4
-        uv pip install -e . --find-links="${WHEELHOUSE_DIRS}" || error_exit "Failed to reinstall dependencies" 4
+            uv pip install -e . || error_exit "Failed to reinstall dependencies" 4
             info "Dependencies reinstalled"
         else
             info "Dependencies verified"
