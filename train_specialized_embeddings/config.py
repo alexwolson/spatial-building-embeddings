@@ -103,7 +103,7 @@ class TripletTrainingConfig(BaseSettings):
         100, ge=1, description="Log metrics every N batches"
     )
     wandb_enabled: bool = Field(
-        False,
+        True,
         description="Enable logging to Weights & Biases (wandb)",
     )
     wandb_project: str | None = Field(
@@ -119,7 +119,7 @@ class TripletTrainingConfig(BaseSettings):
         description="Optional explicit wandb run name",
     )
     wandb_mode: Literal["online", "offline"] = Field(
-        "offline",
+        "online",
         description="wandb mode: online syncs immediately, offline defers sync",
     )
 

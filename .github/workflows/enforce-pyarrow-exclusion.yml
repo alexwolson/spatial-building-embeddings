@@ -19,30 +19,9 @@ jobs:
       - name: Remove pyarrow dependency if present
         shell: bash
         run: |
-          python - <<'PY'
-from pathlib import Path
-
-path = Path("pyproject.toml")
-original_text = path.read_text()
-
-if "pyarrow" not in original_text:
-    raise SystemExit(0)
-
-lines = original_text.splitlines()
-ends_with_newline = original_text.endswith("\n")
-
-modified = False
-filtered_lines = []
-for line in lines:
-    if '"pyarrow' in line.lower():
-        modified = True
-        continue
-    filtered_lines.append(line)
-
-if modified:
-    path.write_text("\n".join(filtered_lines) + ("\n" if ends_with_newline else ""))
-    print("Removed pyarrow entry from pyproject.toml")
-PY
+          python -c "from pathlib import Path; import sys; path = Path('pyproject.toml'); text = path.read_text(); target = '\"pyarrow'; \
+if target not in text: sys.exit(0); lines = text.splitlines(); ends_with_newline = text.endswith('\n'); filtered_lines = [line for line in lines if target not in line]; \
+path.write_text('\n'.join(filtered_lines) + ('\n' if ends_with_newline else '')); print('Removed pyarrow entry from pyproject.toml')"
 
       - name: Fail if pyproject.toml was modified
         shell: bash
