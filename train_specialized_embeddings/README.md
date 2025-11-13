@@ -73,6 +73,28 @@ python train_specialized_embeddings/train.py
     --account <YOUR_ACCOUNT>
 ```
 
+### Hyperparameter Tuning with Optuna
+
+Leverage Optuna to explore hyperparameters by launching many short training runs on Nibi (or any SLURM cluster). All workers share a single Optuna study and reuse the standard triplet trainer.
+
+1. Choose a study name and a storage location that every node can read/write (for SQLite, place the file on scratch or project space).
+2. Launch the workers:
+
+   ```bash
+   ./train_specialized_embeddings/slurm/submit_optuna_tuning.sh \
+       --account <ACCOUNT> \
+       --study-name triplet_tuning \
+       --storage-path /home/<user>/scratch/optuna/triplet.db \
+       --num-workers 16 \
+       --trials-per-worker 2 \
+       --max-epochs 15 \
+       --disable-wandb
+   ```
+
+3. Monitor with `squeue -j <JOB_ID>` and tail logs from `train_specialized_embeddings/logs/optuna`.
+
+Each worker invokes `optuna_worker.py`, samples a configuration, trains, and records results under `train_specialized_embeddings/optuna_trials/trial_#####/`. Use the submit script flags to control concurrency (`--max-concurrent`), WandB behaviour, epoch budgets, or to point at a non-SQLite DSN via `--storage-url`.
+
 ## Configuration
 
 See `config.example.toml` for a complete example configuration file. All hyperparameters can be specified via:
@@ -117,7 +139,7 @@ See `config.example.toml` for a complete example configuration file. All hyperpa
   - Model state dict
   - Optimizer state dict
   - Epoch number
-  - Training/validation metrics
+  - Training/validation metrics, including `best_val_loss`, `best_val_epoch`, total epochs completed, and whether early stopping fired
 
 ### Specialized Embeddings (Optional)
 - If `output_embeddings_dir` is specified, final projected embeddings are saved

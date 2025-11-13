@@ -534,6 +534,7 @@ def train(config: TripletTrainingConfig) -> int:
         logger.info(f"Learning rate: {config.learning_rate}")
 
         best_val_loss = float("inf")
+        best_val_epoch: int | None = None
         no_improvement_epochs = 0
         global_step = 0
         val_metrics = {"val_loss": float("inf")}  # Initialize with default value
@@ -643,6 +644,7 @@ def train(config: TripletTrainingConfig) -> int:
 
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
+                    best_val_epoch = epoch + 1
                     logger.info(f"New best validation loss: {best_val_loss:.6f}")
                     no_improvement_epochs = 0
                 else:
@@ -676,6 +678,10 @@ def train(config: TripletTrainingConfig) -> int:
                 metrics = {
                     "train_loss": avg_epoch_loss,
                     "val_loss": val_metrics.get("val_loss", float("inf")),
+                    "best_val_loss": best_val_loss,
+                    "best_val_epoch": best_val_epoch,
+                    "epochs_completed": epoch + 1,
+                    "early_stopped": False,
                 }
                 save_checkpoint(
                     model, optimizer, epoch, metrics, checkpoint_path, logger
@@ -699,9 +705,19 @@ def train(config: TripletTrainingConfig) -> int:
         # Save final checkpoint
         final_epoch = last_epoch_completed if last_epoch_completed >= 0 else 0
         final_checkpoint_path = config.checkpoint_dir / "checkpoint_final.pt"
+        best_epoch_metric = (
+            best_val_epoch
+            if best_val_epoch is not None
+            else (last_epoch_completed + 1 if last_epoch_completed >= 0 else None)
+        )
         metrics = {
             "train_loss": avg_epoch_loss,
             "val_loss": val_metrics.get("val_loss", float("inf")),
+            "best_val_loss": best_val_loss,
+            "best_val_epoch": best_epoch_metric,
+            "epochs_completed": last_epoch_completed + 1,
+            "early_stopped": early_stop_triggered,
+            "val_metrics": val_metrics.copy(),
         }
         save_checkpoint(
             model, optimizer, final_epoch, metrics, final_checkpoint_path, logger
@@ -731,6 +747,8 @@ def train(config: TripletTrainingConfig) -> int:
                 summary["training/final_epoch_loss"] = avg_epoch_loss
             if math.isfinite(best_val_loss):
                 summary["training/best_val_loss"] = best_val_loss
+            if best_epoch_metric is not None:
+                summary["training/best_val_epoch"] = best_epoch_metric
             final_val_loss = val_metrics.get("val_loss")
             if isinstance(final_val_loss, (int, float)) and math.isfinite(
                 final_val_loss
