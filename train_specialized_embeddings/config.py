@@ -110,10 +110,6 @@ class TripletTrainingConfig(BaseSettings):
         None,
         description="wandb project name",
     )
-    wandb_entity: str | None = Field(
-        None,
-        description="wandb entity (team or user)",
-    )
     wandb_run_name: str | None = Field(
         None,
         description="Optional explicit wandb run name",

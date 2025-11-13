@@ -323,7 +323,6 @@ def train(config: TripletTrainingConfig) -> int:
         config_dict = json.loads(config.model_dump_json())
         init_kwargs: dict[str, Any] = {
             "project": config.wandb_project,
-            "entity": config.wandb_entity,
             "name": config.wandb_run_name,
             "mode": config.wandb_mode,
             "config": config_dict,
