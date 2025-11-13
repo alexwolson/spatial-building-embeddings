@@ -501,6 +501,9 @@ def train(config: TripletTrainingConfig) -> int:
         model = EmbeddingProjector(
             input_dim=config.input_dim,
             hidden_dim=config.hidden_dim,
+            num_hidden_layers=config.num_hidden_layers,
+            hidden_dim_multiplier=config.hidden_dim_multiplier,
+            activation=config.activation,
             output_dim=config.output_dim,
             dropout=config.dropout,
             use_residual=config.use_residual,

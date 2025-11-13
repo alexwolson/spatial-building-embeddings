@@ -43,7 +43,20 @@ class TripletTrainingConfig(BaseSettings):
     input_dim: int = Field(
         768, description="Input embedding dimension (DINOv2 base = 768)"
     )
-    hidden_dim: int = Field(512, description="Hidden layer dimension")
+    hidden_dim: int = Field(512, description="Base hidden layer dimension")
+    num_hidden_layers: PositiveInt = Field(
+        1, description="Number of hidden layers in the projection head"
+    )
+    hidden_dim_multiplier: PositiveFloat = Field(
+        1.0,
+        description=(
+            "Multiplier applied to hidden dimensions for deeper layers "
+            "(values <1 create bottlenecks, >1 widen layers)"
+        ),
+    )
+    activation: Literal["gelu", "relu", "silu"] = Field(
+        "gelu", description="Activation function used between hidden layers"
+    )
     output_dim: int = Field(256, description="Output embedding dimension")
     dropout: float = Field(0.1, ge=0.0, le=1.0, description="Dropout probability")
     use_residual: bool = Field(True, description="Use residual shortcut connection")

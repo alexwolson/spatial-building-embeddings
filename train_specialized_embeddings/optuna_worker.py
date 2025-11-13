@@ -157,8 +157,26 @@ def sample_hyperparameters(
     )
     params["margin"] = trial.suggest_float("margin", 0.2, 1.0)
     params["dropout"] = trial.suggest_float("dropout", 0.0, 0.4)
+    params["use_residual"] = trial.suggest_categorical(
+        "use_residual", [True, False]
+    )
+    params["use_layer_norm"] = trial.suggest_categorical(
+        "use_layer_norm", [True, False]
+    )
+    params["loss_distance"] = trial.suggest_categorical(
+        "loss_distance", ["euclidean", "cosine"]
+    )
     params["hidden_dim"] = trial.suggest_categorical(
         "hidden_dim", [256, 384, 512, 768]
+    )
+    params["num_hidden_layers"] = trial.suggest_int(
+        "num_hidden_layers", 1, 3
+    )
+    params["hidden_dim_multiplier"] = trial.suggest_categorical(
+        "hidden_dim_multiplier", [0.75, 1.0, 1.25]
+    )
+    params["activation"] = trial.suggest_categorical(
+        "activation", ["gelu", "silu", "relu"]
     )
     params["batch_size"] = trial.suggest_categorical(
         "batch_size", [128, 192, 256, 320]
