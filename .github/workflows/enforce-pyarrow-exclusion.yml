@@ -1,0 +1,56 @@
+name: Enforce PyArrow Exclusion
+
+on:
+  push:
+    paths:
+      - pyproject.toml
+      - .github/workflows/enforce-pyarrow-exclusion.yml
+  pull_request:
+    paths:
+      - pyproject.toml
+
+jobs:
+  check-pyarrow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Remove pyarrow dependency if present
+        shell: bash
+        run: |
+          python - <<'PY'
+from pathlib import Path
+
+path = Path("pyproject.toml")
+original_text = path.read_text()
+
+if "pyarrow" not in original_text:
+    raise SystemExit(0)
+
+lines = original_text.splitlines()
+ends_with_newline = original_text.endswith("\n")
+
+modified = False
+filtered_lines = []
+for line in lines:
+    if '"pyarrow' in line.lower():
+        modified = True
+        continue
+    filtered_lines.append(line)
+
+if modified:
+    path.write_text("\n".join(filtered_lines) + ("\n" if ends_with_newline else ""))
+    print("Removed pyarrow entry from pyproject.toml")
+PY
+
+      - name: Fail if pyproject.toml was modified
+        shell: bash
+        run: |
+          if git diff --quiet; then
+              echo "pyproject.toml does not list pyarrow."
+          else
+              echo "::error::pyarrow dependency found and removed. Please drop it from pyproject.toml and recommit."
+              git --no-pager diff
+              exit 1
+
