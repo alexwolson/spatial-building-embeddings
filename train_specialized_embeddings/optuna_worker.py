@@ -290,10 +290,16 @@ def run_trial(
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     metrics: dict[str, Any] = checkpoint.get("metrics", {})
-    best_val_loss = float(metrics.get("best_val_loss", metrics.get("val_loss", math.inf)))
+    best_val_loss = float(
+        metrics.get("best_val_loss", metrics.get("val_loss", math.inf))
+    )
+    val_metrics = metrics.get("val_metrics", {}) or {}
+    pos_neg_ratio = float(val_metrics.get("pos_neg_distance_ratio", math.inf))
 
-    if not math.isfinite(best_val_loss):
-        raise optuna.TrialPruned(f"Non-finite objective ({best_val_loss})")
+    if not math.isfinite(pos_neg_ratio):
+        raise optuna.TrialPruned(
+            f"Non-finite pos/neg distance ratio ({pos_neg_ratio})"
+        )
 
     best_epoch = metrics.get("best_val_epoch")
     early_stopped = bool(metrics.get("early_stopped", False))
@@ -301,20 +307,26 @@ def run_trial(
     trial.set_user_attr("trial_directory", str(trial_dir))
     trial.set_user_attr("early_stopped", early_stopped)
     trial.set_user_attr("best_val_epoch", best_epoch)
+    trial.set_user_attr("best_val_loss", best_val_loss)
+    trial.set_user_attr("pos_neg_distance_ratio", pos_neg_ratio)
 
-    trial.report(best_val_loss, step=int(best_epoch or config.num_epochs))
+    trial.report(pos_neg_ratio, step=int(best_epoch or config.num_epochs))
     if trial.should_prune():
         raise optuna.TrialPruned(f"Pruned at epoch {best_epoch}")
 
     logger.info(
-        "Completed trial %s | objective=%.6f | best_epoch=%s | early_stopped=%s",
+        (
+            "Completed trial %s | ratio=%.6f | best_val_loss=%.6f "
+            "| best_epoch=%s | early_stopped=%s"
+        ),
         trial.number,
+        pos_neg_ratio,
         best_val_loss,
         best_epoch,
         early_stopped,
     )
 
-    return best_val_loss
+    return pos_neg_ratio
 
 
 def main() -> int:
@@ -368,4 +380,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

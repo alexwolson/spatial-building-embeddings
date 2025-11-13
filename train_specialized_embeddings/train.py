@@ -138,6 +138,7 @@ def validate(
         return {
             "val_loss": float("inf"),
             "margin_violation_rate": float("nan"),
+            "pos_neg_distance_ratio": float("nan"),
         }
 
     sampler = RandomSampler(
@@ -157,6 +158,8 @@ def validate(
     num_batches = 0
     violation_count = 0
     total_triplets = 0
+    pos_distance_sum = 0.0
+    neg_distance_sum = 0.0
 
     with torch.no_grad():
         for batch in val_loader:
@@ -186,21 +189,40 @@ def validate(
 
             violation_mask = pos_dist + loss_fn.margin > neg_dist
             violation_count += int(violation_mask.sum().item())
+            pos_distance_sum += float(pos_dist.sum().item())
+            neg_distance_sum += float(neg_dist.sum().item())
 
     avg_loss = total_loss / total_triplets if total_triplets > 0 else float("inf")
     violation_rate = (
         violation_count / total_triplets if total_triplets > 0 else float("nan")
     )
+    avg_pos_distance = (
+        pos_distance_sum / total_triplets if total_triplets > 0 else float("nan")
+    )
+    avg_neg_distance = (
+        neg_distance_sum / total_triplets if total_triplets > 0 else float("nan")
+    )
+    if math.isfinite(avg_neg_distance) and avg_neg_distance > 0:
+        pos_neg_ratio = avg_pos_distance / avg_neg_distance
+    else:
+        pos_neg_ratio = float("nan")
 
     metrics = {
         "val_loss": avg_loss,
         "margin_violation_rate": violation_rate,
+        "pos_neg_distance_ratio": pos_neg_ratio,
     }
 
     logger.info(
-        "Validation loss: %.6f, Margin violation rate: %.4f",
+        (
+            "Validation loss: %.6f, Margin violation rate: %.4f, "
+            "pos/neg distance ratio: %.4f (pos=%.4f, neg=%.4f)"
+        ),
         avg_loss,
         violation_rate,
+        pos_neg_ratio,
+        avg_pos_distance,
+        avg_neg_distance,
     )
 
     return metrics
@@ -540,7 +562,11 @@ def train(config: TripletTrainingConfig) -> int:
         best_val_epoch: int | None = None
         no_improvement_epochs = 0
         global_step = 0
-        val_metrics = {"val_loss": float("inf")}  # Initialize with default value
+        val_metrics = {
+            "val_loss": float("inf"),
+            "margin_violation_rate": float("nan"),
+            "pos_neg_distance_ratio": float("nan"),
+        }
         early_stop_triggered = False
         last_epoch_completed = start_epoch - 1
 
