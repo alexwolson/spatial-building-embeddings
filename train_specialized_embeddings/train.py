@@ -312,7 +312,13 @@ def train(config: TripletTrainingConfig) -> int:
     """Main training function."""
     wandb_run: Any | None = None
     if config.wandb_enabled:
-        import wandb  # type: ignore[import]
+        try:
+            import wandb  # type: ignore[import]
+        except ModuleNotFoundError as exc:  # pragma: no cover - environment-specific
+            raise RuntimeError(
+                "Weights & Biases logging is enabled, but the `wandb` package is not installed. "
+                "Install it (e.g., `uv pip install wandb`) or disable wandb logging in the config."
+            ) from exc
 
         config_dict = json.loads(config.model_dump_json())
         init_kwargs: dict[str, Any] = {

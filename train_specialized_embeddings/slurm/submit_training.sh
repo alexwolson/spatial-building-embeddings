@@ -230,7 +230,7 @@ if [ "${NO_VENV}" = false ]; then
         source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
         
         # Check for all required dependencies including torch
-        if ! python -c "import pandas, rich, pydantic, torch" 2>/dev/null; then
+        if ! python -c "import pandas, rich, pydantic, torch, wandb" 2>/dev/null; then
             warning "Key packages missing, reinstalling dependencies..."
             # Install uv if not available
             if ! command -v uv &> /dev/null; then
