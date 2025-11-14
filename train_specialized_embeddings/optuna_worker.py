@@ -18,11 +18,14 @@ import argparse
 import logging
 import math
 import os
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
 import optuna  # type: ignore[import]
 import torch
+from sqlalchemy.exc import OperationalError
 from rich.logging import RichHandler
 
 from train_specialized_embeddings.config import (
@@ -207,14 +210,47 @@ def build_config_with_updates(
     return TripletTrainingConfig(**payload)
 
 
-def determine_storage(storage_url: str, sqlite_timeout: float) -> optuna.storages.BaseStorage:
-    if storage_url.startswith("sqlite"):
-        engine_kwargs = {"connect_args": {"timeout": sqlite_timeout}}
-        return optuna.storages.RDBStorage(
-            url=storage_url,
-            engine_kwargs=engine_kwargs,
-        )
-    return optuna.storages.RDBStorage(url=storage_url)
+def determine_storage(
+    storage_url: str,
+    sqlite_timeout: float,
+    max_retries: int = 5,
+    retry_sleep: float = 0.5,
+) -> optuna.storages.BaseStorage:
+    def _create_storage() -> optuna.storages.BaseStorage:
+        if storage_url.startswith("sqlite"):
+            engine_kwargs = {"connect_args": {"timeout": sqlite_timeout}}
+            return optuna.storages.RDBStorage(
+                url=storage_url,
+                engine_kwargs=engine_kwargs,
+            )
+        return optuna.storages.RDBStorage(url=storage_url)
+
+    if not storage_url.startswith("sqlite"):
+        return _create_storage()
+
+    logger = logging.getLogger(LOGGER_NAME)
+    attempt = 0
+    while True:
+        try:
+            return _create_storage()
+        except OperationalError as exc:
+            root = exc.orig if hasattr(exc, "orig") else exc
+            message = str(root).lower()
+            table_exists = isinstance(root, sqlite3.OperationalError) and (
+                "already exists" in message or "exists" in message
+            )
+            if not table_exists or attempt >= max_retries:
+                raise
+            backoff = retry_sleep * (attempt + 1)
+            logger.warning(
+                "SQLite storage initialisation race detected (attempt %d/%d). "
+                "Retrying in %.2fs...",
+                attempt + 1,
+                max_retries,
+                backoff,
+            )
+            time.sleep(backoff)
+            attempt += 1
 
 
 def run_trial(
