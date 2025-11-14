@@ -9,7 +9,7 @@ For every trial the worker:
   2. Samples a set of hyperparameters.
   3. Materialises an isolated working directory for checkpoints and logs.
   4. Runs the standard training loop.
-  5. Reports the best validation loss back to Optuna.
+  5. Reports retrieval recall@100 back to Optuna.
 """
 
 from __future__ import annotations
@@ -294,11 +294,12 @@ def run_trial(
         metrics.get("best_val_loss", metrics.get("val_loss", math.inf))
     )
     val_metrics = metrics.get("val_metrics", {}) or {}
-    pos_neg_ratio = float(val_metrics.get("pos_neg_distance_ratio", math.inf))
+    recall_metric_name = "retrieval_recall@100"
+    recall_at_100 = float(val_metrics.get(recall_metric_name, float("nan")))
 
-    if not math.isfinite(pos_neg_ratio):
+    if not math.isfinite(recall_at_100):
         raise optuna.TrialPruned(
-            f"Non-finite pos/neg distance ratio ({pos_neg_ratio})"
+            f"Missing or non-finite {recall_metric_name} ({recall_at_100})"
         )
 
     best_epoch = metrics.get("best_val_epoch")
@@ -308,25 +309,25 @@ def run_trial(
     trial.set_user_attr("early_stopped", early_stopped)
     trial.set_user_attr("best_val_epoch", best_epoch)
     trial.set_user_attr("best_val_loss", best_val_loss)
-    trial.set_user_attr("pos_neg_distance_ratio", pos_neg_ratio)
+    trial.set_user_attr(recall_metric_name, recall_at_100)
 
-    trial.report(pos_neg_ratio, step=int(best_epoch or config.num_epochs))
+    trial.report(recall_at_100, step=int(best_epoch or config.num_epochs))
     if trial.should_prune():
         raise optuna.TrialPruned(f"Pruned at epoch {best_epoch}")
 
     logger.info(
         (
-            "Completed trial %s | ratio=%.6f | best_val_loss=%.6f "
+            "Completed trial %s | recall@100=%.6f | best_val_loss=%.6f "
             "| best_epoch=%s | early_stopped=%s"
         ),
         trial.number,
-        pos_neg_ratio,
+        recall_at_100,
         best_val_loss,
         best_epoch,
         early_stopped,
     )
 
-    return pos_neg_ratio
+    return recall_at_100
 
 
 def main() -> int:
@@ -344,7 +345,7 @@ def main() -> int:
     study = optuna.create_study(
         study_name=args.study_name,
         storage=storage,
-        direction="minimize",
+        direction="maximize",
         load_if_exists=True,
     )
 

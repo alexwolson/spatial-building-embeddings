@@ -41,6 +41,8 @@ save_every_n_epochs = 5      # Save checkpoint every N epochs
 validate_every_n_epochs = 1  # Run validation every N epochs
 resume_from_checkpoint = null  # Path to checkpoint to resume from (optional)
 early_stopping_patience = 0  # Validations with no improvement before stopping (0 disables)
+retrieval_metric_max_queries = 4096
+retrieval_metric_per_building_limit = 4
 
 # Logging
 log_file = null          # Optional log file path

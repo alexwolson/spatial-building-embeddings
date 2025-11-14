@@ -106,11 +106,11 @@ class TripletTrainingConfig(BaseSettings):
         description="Number of validations with no improvement before stopping (0 disables early stopping)",
     )
     retrieval_metric_top_k: tuple[int, ...] = Field(
-        (1, 5, 10),
+        (1, 5, 10, 100, 1000),
         description="Top-k values to report for the retrieval metric",
     )
     retrieval_metric_max_queries: int = Field(
-        512,
+        4096,
         ge=1,
         description="Maximum number of validation exemplars used when computing retrieval metrics",
     )

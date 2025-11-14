@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from rich.logging import RichHandler
 from torch.utils.data import DataLoader, RandomSampler
 
@@ -137,8 +136,6 @@ def validate(
         logger.warning("Validation dataset has no samples; skipping validation.")
         return {
             "val_loss": float("inf"),
-            "margin_violation_rate": float("nan"),
-            "pos_neg_distance_ratio": float("nan"),
         }
 
     sampler = RandomSampler(
@@ -155,11 +152,7 @@ def validate(
     )
 
     total_loss = 0.0
-    num_batches = 0
-    violation_count = 0
     total_triplets = 0
-    pos_distance_sum = 0.0
-    neg_distance_sum = 0.0
 
     with torch.no_grad():
         for batch in val_loader:
@@ -176,54 +169,12 @@ def validate(
             loss = loss_fn(anchor_proj, positive_proj, negative_proj)
             batch_size_actual = anchor.size(0)
             total_loss += loss.item() * batch_size_actual
-            num_batches += 1
             total_triplets += batch_size_actual
 
-            # Margin violations
-            if loss_fn.distance == "euclidean":
-                pos_dist = torch.norm(anchor_proj - positive_proj, p=2, dim=1)
-                neg_dist = torch.norm(anchor_proj - negative_proj, p=2, dim=1)
-            else:  # cosine distance (1 - cosine similarity)
-                pos_dist = 1 - F.cosine_similarity(anchor_proj, positive_proj)
-                neg_dist = 1 - F.cosine_similarity(anchor_proj, negative_proj)
-
-            violation_mask = pos_dist + loss_fn.margin > neg_dist
-            violation_count += int(violation_mask.sum().item())
-            pos_distance_sum += float(pos_dist.sum().item())
-            neg_distance_sum += float(neg_dist.sum().item())
-
     avg_loss = total_loss / total_triplets if total_triplets > 0 else float("inf")
-    violation_rate = (
-        violation_count / total_triplets if total_triplets > 0 else float("nan")
-    )
-    avg_pos_distance = (
-        pos_distance_sum / total_triplets if total_triplets > 0 else float("nan")
-    )
-    avg_neg_distance = (
-        neg_distance_sum / total_triplets if total_triplets > 0 else float("nan")
-    )
-    if math.isfinite(avg_neg_distance) and avg_neg_distance > 0:
-        pos_neg_ratio = avg_pos_distance / avg_neg_distance
-    else:
-        pos_neg_ratio = float("nan")
+    metrics = {"val_loss": avg_loss}
 
-    metrics = {
-        "val_loss": avg_loss,
-        "margin_violation_rate": violation_rate,
-        "pos_neg_distance_ratio": pos_neg_ratio,
-    }
-
-    logger.info(
-        (
-            "Validation loss: %.6f, Margin violation rate: %.4f, "
-            "pos/neg distance ratio: %.4f (pos=%.4f, neg=%.4f)"
-        ),
-        avg_loss,
-        violation_rate,
-        pos_neg_ratio,
-        avg_pos_distance,
-        avg_neg_distance,
-    )
+    logger.info("Validation loss: %.6f", avg_loss)
 
     return metrics
 
@@ -233,7 +184,7 @@ def compute_retrieval_metrics(
     val_dataset: TripletDataset,
     device: torch.device,
     logger: logging.Logger,
-    top_k: tuple[int, ...] = (1, 5, 10),
+    top_k: tuple[int, ...] = (1, 5, 10, 100, 1000),
     max_queries: int = 512,
     per_building_limit: int = 4,
 ) -> dict[str, float]:
@@ -564,8 +515,6 @@ def train(config: TripletTrainingConfig) -> int:
         global_step = 0
         val_metrics = {
             "val_loss": float("inf"),
-            "margin_violation_rate": float("nan"),
-            "pos_neg_distance_ratio": float("nan"),
         }
         early_stop_triggered = False
         last_epoch_completed = start_epoch - 1

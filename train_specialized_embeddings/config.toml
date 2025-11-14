@@ -42,8 +42,8 @@ seed = 42
 save_every_n_epochs = 5
 validate_every_n_epochs = 1
 early_stopping_patience = 3
-retrieval_metric_top_k = [1, 5, 10]
-retrieval_metric_max_queries = 512
+retrieval_metric_top_k = [1, 5, 10, 100, 1000]
+retrieval_metric_max_queries = 4096
 retrieval_metric_per_building_limit = 4
 
 # Logging
