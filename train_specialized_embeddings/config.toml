@@ -52,3 +52,7 @@ log_every_n_batches = 100
 wandb_enabled = true
 wandb_project = "spatial-building-embeddings"
 wandb_mode = "online"
+
+# Best training configuration (for fetch_best_and_train.py)
+best_training_trial_name_pattern = ".*-trial-.*"  # Regex pattern to match Optuna trial run names in WandB
+best_training_metric_name = "val/retrieval_recall@100"  # Metric name to use for selecting best run from WandB

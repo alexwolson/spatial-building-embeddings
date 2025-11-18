@@ -142,6 +142,16 @@ class TripletTrainingConfig(BaseSettings):
         description="wandb mode: online syncs immediately, offline defers sync",
     )
 
+    # Best training configuration (for fetch_best_and_train.py)
+    best_training_trial_name_pattern: str = Field(
+        ".*-trial-.*",
+        description="Regex pattern to match Optuna trial run names in WandB (for best training)",
+    )
+    best_training_metric_name: str = Field(
+        "val/retrieval_recall@100",
+        description="Metric name to use for selecting best run from WandB (for best training)",
+    )
+
     def model_post_init(self, __context):
         """Validate configuration after initialization."""
         if self.device == "auto":

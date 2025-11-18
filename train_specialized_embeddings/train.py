@@ -625,6 +625,20 @@ def train(config: TripletTrainingConfig) -> int:
                     best_val_epoch = epoch + 1
                     logger.info(f"New best validation loss: {best_val_loss:.6f}")
                     no_improvement_epochs = 0
+                    # Save checkpoint on improvement
+                    best_checkpoint_path = config.checkpoint_dir / "checkpoint_best.pt"
+                    metrics = {
+                        "train_loss": avg_epoch_loss,
+                        "val_loss": val_loss,
+                        "best_val_loss": best_val_loss,
+                        "best_val_epoch": best_val_epoch,
+                        "epochs_completed": epoch + 1,
+                        "early_stopped": False,
+                        "val_metrics": val_metrics.copy(),
+                    }
+                    save_checkpoint(
+                        model, optimizer, epoch, metrics, best_checkpoint_path, logger
+                    )
                 else:
                     no_improvement_epochs += 1
                     logger.info(
