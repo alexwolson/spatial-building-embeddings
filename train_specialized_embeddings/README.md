@@ -32,7 +32,7 @@ The training pipeline:
 ### Local Training
 
 ```bash
-# Using config file
+# Using unified config file (at project root)
 python train_specialized_embeddings/train.py --config config.toml
 
 # Using environment variables
@@ -97,8 +97,8 @@ Each worker invokes `optuna_worker.py`, samples a configuration, trains, and rec
 
 ## Configuration
 
-See `config.example.toml` for a complete example configuration file. All hyperparameters can be specified via:
-- TOML config file (recommended)
+See the root `config.example.toml` for a complete example configuration file. The unified config includes a `[global]` section for shared settings (seed, data paths) and a `[triplet_training]` section for training-specific settings. All hyperparameters can be specified via:
+- TOML config file (recommended) - use the unified `config.toml` at project root
 - Environment variables with `TRIPLET_TRAINING_` prefix
 - Command-line arguments (for SLURM submission script)
 

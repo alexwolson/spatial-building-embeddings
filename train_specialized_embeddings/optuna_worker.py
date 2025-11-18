@@ -28,7 +28,7 @@ import torch
 from sqlalchemy.exc import OperationalError
 from rich.logging import RichHandler
 
-from train_specialized_embeddings.config import (
+from config import (
     TripletTrainingConfig,
     load_config_from_file,
 )

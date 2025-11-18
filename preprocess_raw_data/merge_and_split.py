@@ -25,7 +25,7 @@ from rich.progress import (
     TaskProgressColumn,
 )
 
-from preprocess_raw_data.config import MergeAndSplitConfig, load_config_from_file
+from config import MergeAndSplitConfig, load_config_from_file
 from pandas.util import hash_pandas_object
 
 

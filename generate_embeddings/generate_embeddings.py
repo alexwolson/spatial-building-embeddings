@@ -40,7 +40,7 @@ from rich.progress import (
 )
 import timm
 
-from generate_embeddings.config import GenerateEmbeddingsConfig, load_config_from_file
+from config import GenerateEmbeddingsConfig, load_config_from_file
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:

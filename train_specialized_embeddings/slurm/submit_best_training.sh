@@ -6,7 +6,7 @@
 #
 # Options:
 #   --account <ACCOUNT>         SLURM account name (required or use SLURM_ACCOUNT)
-#   --config <PATH>            Path to TOML config file (default: train_specialized_embeddings/config.toml)
+#   --config <PATH>            Path to TOML config file (default: config.toml)
 #   --time <HH:MM:SS>           Wall clock limit (default: 48:00:00)
 #   --mem <MEM>                 Memory requirement (default: 256G)
 #   --cpus <N>                  CPU count (default: 8)
@@ -18,7 +18,7 @@
 #   --help                      Show this message
 #
 # Examples:
-#   ./submit_best_training.sh --account def-someuser --config train_specialized_embeddings/config.toml
+#   ./submit_best_training.sh --account def-someuser --config config.toml
 #   ./submit_best_training.sh --account def-someuser --config /path/to/custom_config.toml
 #
 # Exit codes:
@@ -145,7 +145,7 @@ info "Project root: ${PROJECT_ROOT}"
 
 # Determine default paths
 if [ -z "${CONFIG_PATH}" ]; then
-    CONFIG_PATH="${PROJECT_ROOT}/train_specialized_embeddings/config.toml"
+    CONFIG_PATH="${PROJECT_ROOT}/config.toml"
 fi
 CONFIG_PATH="$(resolve_abs_path "${CONFIG_PATH}")"
 

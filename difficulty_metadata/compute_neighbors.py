@@ -26,7 +26,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from sklearn.neighbors import BallTree
 
-from difficulty_metadata.config import DifficultyMetadataConfig, load_config_from_file
+from config import DifficultyMetadataConfig, load_config_from_file
 
 EARTH_RADIUS_METERS = 6_371_008.8
 MIN_CALIBRATION_SAMPLE = 10_000

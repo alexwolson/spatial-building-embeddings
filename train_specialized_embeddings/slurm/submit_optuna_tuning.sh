@@ -9,7 +9,7 @@
 #   --study-name <NAME>         Optuna study name (default: triplet_tuning)
 #   --storage-url <URL>         Optuna storage URL. Overrides --storage-path if set.
 #   --storage-path <PATH>       Path to SQLite database (default: <project>/train_specialized_embeddings/optuna/optuna.db)
-#   --base-config <PATH>        Base training TOML config (default: train_specialized_embeddings/config.toml)
+#   --base-config <PATH>        Base training TOML config (default: config.toml)
 #   --trial-output-root <PATH>  Directory for per-trial artefacts (default: <project>/train_specialized_embeddings/optuna_trials)
 #   --num-workers <N>           Number of workers / job array size (default: 4)
 #   --max-concurrent <N>        Maximum concurrent workers (default: unlimited)
@@ -226,7 +226,7 @@ info "Project root: ${PROJECT_ROOT}"
 
 # Determine default paths
 if [ -z "${BASE_CONFIG_PATH}" ]; then
-    BASE_CONFIG_PATH="${PROJECT_ROOT}/train_specialized_embeddings/config.toml"
+    BASE_CONFIG_PATH="${PROJECT_ROOT}/config.toml"
 fi
 BASE_CONFIG_PATH="$(resolve_abs_path "${BASE_CONFIG_PATH}")"
 

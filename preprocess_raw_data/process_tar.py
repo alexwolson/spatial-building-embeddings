@@ -26,7 +26,7 @@ from rich.progress import (
     TaskProgressColumn,
 )
 
-from preprocess_raw_data.config import ProcessTarConfig, load_config_from_file
+from config import ProcessTarConfig, load_config_from_file
 
 
 class MetadataEntry(NamedTuple):
