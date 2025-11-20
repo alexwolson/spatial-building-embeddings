@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
+
 # Log job information
 echo "=========================================="
 echo "Job Array Task Information"
@@ -31,63 +34,31 @@ echo "Node: ${SLURM_NODELIST}"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=========================================="
 
-# Step 1: Clean environment (best practice)
-module purge
+# Step 1: Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
-# Step 2: Load Arrow module (required for PyArrow, must be loaded before Python/venv)
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
-fi
-
-# Step 3: Load Python module
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-else
-    echo "Warning: PYTHON_MODULE not set, using system Python"
-fi
-
-# Step 4: Activate Python virtual environment (if using venv)
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python (no virtual environment)"
-fi
-
-# Step 4: Get tar file path from list file using SLURM_ARRAY_TASK_ID
+# Step 2: Get tar file path from list file using SLURM_ARRAY_TASK_ID
 if [ ! -f "${TAR_LIST_FILE}" ]; then
-    echo "Error: Tar list file not found: ${TAR_LIST_FILE}" >&2
-    exit 1
+    error_exit "Tar list file not found: ${TAR_LIST_FILE}"
 fi
 
 TAR_FILE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${TAR_LIST_FILE}")
 
 if [ -z "${TAR_FILE}" ]; then
-    echo "Error: No tar file found at task ID ${SLURM_ARRAY_TASK_ID}" >&2
-    exit 1
+    error_exit "No tar file found at task ID ${SLURM_ARRAY_TASK_ID}"
 fi
 
 echo "Processing tar file: ${TAR_FILE}"
 
-# Step 5: Determine project root - use environment variable if set, otherwise auto-detect
+# Step 3: Determine project root - use environment variable if set, otherwise auto-detect
 if [ -z "${PROJECT_ROOT:-}" ]; then
     # Get the directory where this script is located
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-else
-    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
 fi
 
 if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" ]; then
-    echo "Error: process_tar.py not found at ${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" >&2
-    exit 1
+    error_exit "process_tar.py not found at ${PROJECT_ROOT}/preprocess_raw_data/process_tar.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -96,8 +67,7 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 # Locate base config file
 BASE_CONFIG="${PROJECT_ROOT}/config.toml"
 if [ ! -f "${BASE_CONFIG}" ]; then
-    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
-    exit 1
+    error_exit "Base config file not found: ${BASE_CONFIG}"
 fi
 
 # Use SLURM_TMPDIR (node-local storage) for extraction if available
@@ -105,9 +75,9 @@ fi
 EXTRACT_DIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/extract_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${EXTRACT_DIR}"
 
-# Step 6: Check if output already exists (resume capability)
+# Step 4: Check if output already exists (resume capability)
 # Extract intermediates_dir from config.toml for checking existing files
-INTERMEDIATES_DIR=$(awk -F'=' '/^intermediates_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${BASE_CONFIG}" | head -1)
+INTERMEDIATES_DIR=$(read_toml_value "${BASE_CONFIG}" "paths" "intermediates_dir")
 if [ -z "${INTERMEDIATES_DIR}" ]; then
     # Fallback to default if not found
     INTERMEDIATES_DIR="data/intermediates"
@@ -120,7 +90,7 @@ if [ -f "${OUTPUT_FILE}" ]; then
     exit 0
 fi
 
-# Step 7: Run processing script with base config and CLI args
+# Step 5: Run processing script with base config and CLI args
 echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
 # Ensure cleanup on exit
@@ -139,7 +109,7 @@ python "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" \
 
 EXIT_CODE=$?
 
-# Step 7: Error handling
+# Step 6: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "Error: Processing failed with exit code ${EXIT_CODE}" >&2
     echo "End time: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -150,4 +120,3 @@ echo "Processing completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Output file: ${OUTPUT_FILE}"
 
 exit 0
-

@@ -5,12 +5,9 @@
 # all intermediate Parquet files, filter singletons, create splits, and write final files.
 #
 # Usage:
-#   ./submit_merge.sh --intermediates-dir /path/to/intermediates --output-dir /path/to/output --account <ACCOUNT>
+#   ./submit_merge.sh --account <ACCOUNT>
 #
 # Options:
-#   --intermediates-dir <DIR>  Directory containing intermediate Parquet files (required)
-#   --output-dir <DIR>         Directory for final output Parquet files (required)
-#   --embeddings-dir <DIR>     Directory containing per-tar embedding Parquet files (required)
 #   --account <ACCOUNT>        SLURM account name (required, or use SLURM_ACCOUNT env var)
 #   --time <TIME>              Time limit (default: 12:00:00)
 #   --mem <MEM>                Memory requirement (default: 100G)
@@ -24,16 +21,6 @@
 #   --no-venv                  Use system Python instead of creating/using venv
 #   --help                     Show this help message
 #
-# Examples:
-#   # Basic usage with automatic venv creation
-#   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final --account <ACCOUNT>
-#
-#   # Wait for tar preprocessing jobs to complete
-#   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final \
-#       --account <ACCOUNT> --dependency 12345
-#
-#   # Note: Split ratios and seed are configured in config.toml
-#
 # Exit codes:
 #   0: Success
 #   1: Invalid arguments or missing required options
@@ -45,10 +32,11 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../slurm/common.sh"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default values
-INTERMEDIATES_DIR=""
-OUTPUT_DIR=""
-EMBEDDINGS_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="00:30:00"
 MEM="100G"
@@ -60,29 +48,6 @@ ARROW_MODULE="arrow/17.0.0"
 PROJECT_ROOT=""
 NO_VENV=false
 
-# Colours for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Colour
-
-# Function to print error and exit
-error_exit() {
-    echo -e "${RED}Error:${NC} $1" >&2
-    exit "${2:-1}"
-}
-
-# Function to print info
-info() {
-    echo -e "${GREEN}Info:${NC} $1"
-}
-
-# Function to print warning
-warning() {
-    echo -e "${YELLOW}Warning:${NC} $1"
-}
-
-# Function to show usage
 show_usage() {
     grep "^# " "${0}" | sed 's/^# //' | head -n 40
     exit 0
@@ -91,124 +56,55 @@ show_usage() {
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --intermediates-dir)
-            INTERMEDIATES_DIR="$2"
-            shift 2
-            ;;
-        --output-dir)
-            OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --account)
-            ACCOUNT="$2"
-            shift 2
-            ;;
-        --embeddings-dir)
-            EMBEDDINGS_DIR="$2"
-            shift 2
-            ;;
-        --time)
-            TIME="$2"
-            shift 2
-            ;;
-        --mem)
-            MEM="$2"
-            shift 2
-            ;;
-        --cpus)
-            CPUS="$2"
-            shift 2
-            ;;
-        --dependency)
-            DEPENDENCY="$2"
-            shift 2
-            ;;
-        --venv-path)
-            VENV_PATH="$2"
-            shift 2
-            ;;
-        --python-module)
-            PYTHON_MODULE="$2"
-            shift 2
-            ;;
-        --arrow-module)
-            ARROW_MODULE="$2"
-            shift 2
-            ;;
-        --project-root)
-            PROJECT_ROOT="$2"
-            shift 2
-            ;;
-        --no-venv)
-            NO_VENV=true
-            shift
-            ;;
-        --help)
-            show_usage
-            ;;
-        *)
-            error_exit "Unknown option: $1" 1
-            ;;
+        --account) ACCOUNT="$2"; shift 2 ;;
+        --time) TIME="$2"; shift 2 ;;
+        --mem) MEM="$2"; shift 2 ;;
+        --cpus) CPUS="$2"; shift 2 ;;
+        --dependency) DEPENDENCY="$2"; shift 2 ;;
+        --venv-path) VENV_PATH="$2"; shift 2 ;;
+        --python-module) PYTHON_MODULE="$2"; shift 2 ;;
+        --arrow-module) ARROW_MODULE="$2"; shift 2 ;;
+        --project-root) PROJECT_ROOT="$2"; shift 2 ;;
+        --no-venv) NO_VENV=true; shift ;;
+        --help) show_usage ;;
+        *) error_exit "Unknown option: $1" 1 ;;
     esac
 done
 
-# Validate required arguments
-if [ -z "${INTERMEDIATES_DIR}" ]; then
-    error_exit "--intermediates-dir is required" 1
+if [ -z "${ACCOUNT}" ]; then error_exit "--account is required (or set SLURM_ACCOUNT environment variable)" 1; fi
+
+# Step 1: Auto-detect project root
+PROJECT_ROOT=$(resolve_project_root "${PROJECT_ROOT}" "${SCRIPT_DIR}")
+if [ -z "${PROJECT_ROOT}" ] || [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
+    error_exit "Could not find project root (pyproject.toml). Use --project-root to specify." 5
 fi
-
-if [ -z "${OUTPUT_DIR}" ]; then
-    error_exit "--output-dir is required" 1
-fi
-
-if [ -z "${EMBEDDINGS_DIR}" ]; then
-    error_exit "--embeddings-dir is required" 1
-fi
-
-if [ -z "${ACCOUNT}" ]; then
-    error_exit "--account is required (or set SLURM_ACCOUNT environment variable)" 1
-fi
-
-# Note: Ratio validation will be done by the Python script when it loads config.toml
-
-# Step 1: Auto-detect project root if not provided
-if [ -z "${PROJECT_ROOT}" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    # Look for pyproject.toml starting from script directory
-    CURRENT_DIR="${SCRIPT_DIR}/../.."
-    if [ -f "${CURRENT_DIR}/pyproject.toml" ]; then
-        PROJECT_ROOT="${CURRENT_DIR}"
-    elif [ -f "${PWD}/pyproject.toml" ]; then
-        PROJECT_ROOT="${PWD}"
-    else
-        error_exit "Could not find project root (pyproject.toml). Use --project-root to specify." 5
-    fi
-fi
-
-if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
-    error_exit "Project root does not contain pyproject.toml: ${PROJECT_ROOT}" 5
-fi
-
 info "Project root: ${PROJECT_ROOT}"
 
-# Step 2: Validate inputs
+# Step 2: Read paths from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+INTERMEDIATES_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "intermediates_dir")
+OUTPUT_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "merged_dir")
+EMBEDDINGS_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "embeddings_dir")
+
+if [ -z "${INTERMEDIATES_DIR}" ]; then error_exit "intermediates_dir not found in [paths] section of config.toml" 1; fi
+if [ -z "${OUTPUT_DIR}" ]; then error_exit "merged_dir not found in [paths] section of config.toml" 1; fi
+if [ -z "${EMBEDDINGS_DIR}" ]; then error_exit "embeddings_dir not found in [paths] section of config.toml" 1; fi
+
+# Step 3: Validate inputs
 if [ ! -d "${INTERMEDIATES_DIR}" ]; then
     error_exit "Intermediates directory not found: ${INTERMEDIATES_DIR}" 2
 fi
-
 PARQUET_COUNT=$(find "${INTERMEDIATES_DIR}" -name "*.parquet" -type f | wc -l)
 if [ "${PARQUET_COUNT}" -eq 0 ]; then
     error_exit "No Parquet files found in ${INTERMEDIATES_DIR}" 2
 fi
+info "Found ${PARQUET_COUNT} intermediate Parquet files in ${INTERMEDIATES_DIR}"
 
-info "Found ${PARQUET_COUNT} intermediate Parquet files"
-
-# Check output directory is writable
+# Check output directory
 if [ ! -d "${OUTPUT_DIR}" ]; then
     info "Creating output directory: ${OUTPUT_DIR}"
     mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
 fi
-
 if [ ! -w "${OUTPUT_DIR}" ]; then
     error_exit "Output directory is not writable: ${OUTPUT_DIR}" 2
 fi
@@ -216,107 +112,37 @@ fi
 if [ ! -d "${EMBEDDINGS_DIR}" ]; then
     error_exit "Embeddings directory not found: ${EMBEDDINGS_DIR}" 2
 fi
-
 EMBEDDING_COUNT=$(find "${EMBEDDINGS_DIR}" -name "*_embeddings.parquet" -type f | wc -l)
 if [ "${EMBEDDING_COUNT}" -eq 0 ]; then
     error_exit "No embedding Parquet files found in ${EMBEDDINGS_DIR}" 2
 fi
 
-# Warn if embedding count differs from intermediates
 if [ "${EMBEDDING_COUNT}" -ne "${PARQUET_COUNT}" ]; then
     warning "Found ${EMBEDDING_COUNT} embedding files but ${PARQUET_COUNT} intermediate files"
 fi
 
-# Step 3: Setup Python environment (similar to tar preprocessing submission script)
-if [ "${NO_VENV}" = false ]; then
-    # Load Arrow module if specified (needed for PyArrow)
-    if [ -n "${ARROW_MODULE:-}" ]; then
-        info "Loading Arrow module: ${ARROW_MODULE}"
-        # Load gcc first (required by Arrow module)
-        module load gcc 2>/dev/null || true
-        module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
-    fi
-    
-    # Check if venv exists
-    if [ -d "${VENV_PATH}" ]; then
-        info "Virtual environment exists: ${VENV_PATH}"
-        info "Verifying dependencies..."
-        
-        # Activate and check for key packages
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        
-        if ! python -c "import pandas, pyarrow" 2>/dev/null; then
-            warning "Key packages missing, reinstalling..."
-            pip install --upgrade pip
-            cd "${PROJECT_ROOT}"
-            pip install -e .
-        else
-            info "Dependencies verified"
-        fi
-        deactivate
-    else
-        info "Creating virtual environment: ${VENV_PATH}"
-        
-        # Load Python module
-        module load "${PYTHON_MODULE}"
-        
-        # Create venv (Arrow module should already be loaded)
-        python -m venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
-        
-        # Activate and install dependencies
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        
-        pip install --upgrade pip
-        cd "${PROJECT_ROOT}"
-        pip install -e . || error_exit "Failed to install project dependencies" 4
-        
-        deactivate
-        
-        info "Virtual environment created and dependencies installed"
-    fi
-else
-    info "Using system Python (--no-venv flag set)"
-    if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
-        error_exit "Python module not available: ${PYTHON_MODULE}" 3
-    fi
-    VENV_PATH=""  # Clear VENV_PATH for system Python
-fi
+# Step 4: Setup Python environment
+setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,pyarrow"
 
-# Step 4: Extract log_dir from config.toml
-CONFIG_FILE="${PROJECT_ROOT}/config.toml"
-if [ ! -f "${CONFIG_FILE}" ]; then
-    error_exit "Config file not found: ${CONFIG_FILE}" 1
-fi
-# Extract log_dir from config.toml (remove quotes and whitespace)
-LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
-if [ -z "${LOG_DIR}" ]; then
-    error_exit "log_dir not found in config.toml" 1
-fi
-# Resolve relative path if needed (relative to PROJECT_ROOT)
-if [[ "${LOG_DIR}" != /* ]]; then
-    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
-fi
+# Step 5: Extract log_dir from config.toml
+LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "")
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 info "Output directory: ${OUTPUT_DIR}"
 info "Log directory: ${LOG_DIR}"
 info "Embeddings directory: ${EMBEDDINGS_DIR}"
 
-# Step 5: Submit job
+# Step 6: Submit job
 SBATCH_SCRIPT="${SCRIPT_DIR}/merge_and_split.sbatch"
 
-# Build export string - only include VENV_PATH and ARROW_MODULE if they're set
-# Note: train_ratio, val_ratio, test_ratio, and seed come from config.toml only
-EXPORT_VARS="ALL,INTERMEDIATES_DIR=${INTERMEDIATES_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE}"
-EXPORT_VARS="${EXPORT_VARS},EMBEDDINGS_DIR=${EMBEDDINGS_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
-if [ -n "${VENV_PATH:-}" ]; then
+EXPORT_VARS="ALL,INTERMEDIATES_DIR=${INTERMEDIATES_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},EMBEDDINGS_DIR=${EMBEDDINGS_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
+if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
 
-# Build sbatch command
 SBATCH_CMD=(
     sbatch
     --account="${ACCOUNT}"
@@ -329,23 +155,17 @@ SBATCH_CMD=(
     --export="${EXPORT_VARS}"
 )
 
-# Add dependency if specified
 if [ -n "${DEPENDENCY}" ]; then
     SBATCH_CMD+=(--dependency="afterok:${DEPENDENCY}")
     info "Job will wait for job(s): ${DEPENDENCY}"
 fi
 
-# Add batch script
 SBATCH_CMD+=("${SBATCH_SCRIPT}")
 
-# Submit job
 SUBMIT_OUTPUT=$("${SBATCH_CMD[@]}" 2>&1)
 
-# Extract job ID
 if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     JOB_ID=$(echo "${SUBMIT_OUTPUT}" | grep -oE '[0-9]+' | head -n 1)
-    
-    # Print submission summary
     echo ""
     echo "=========================================="
     echo "Job Submission Summary"
@@ -357,11 +177,10 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "Intermediates directory: ${INTERMEDIATES_DIR}"
     echo "Output directory: ${OUTPUT_DIR}"
     echo "Parquet files found: ${PARQUET_COUNT}"
-    echo "Split ratios and seed: from config.toml"
     if [ -n "${DEPENDENCY}" ]; then
         echo "Dependency: afterok:${DEPENDENCY}"
     fi
-    if [ -n "${VENV_PATH}" ]; then
+    if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH}" ]; then
         echo "Virtual environment: ${VENV_PATH}"
     else
         echo "Python: System Python (${PYTHON_MODULE})"
@@ -374,9 +193,7 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "  tail -f ${LOG_DIR}/merge_${JOB_ID}.out"
     echo "  tail -f ${LOG_DIR}/merge_${JOB_ID}.err"
     echo "=========================================="
-    
     exit 0
 else
     error_exit "Job submission failed: ${SUBMIT_OUTPUT}" 6
 fi
-

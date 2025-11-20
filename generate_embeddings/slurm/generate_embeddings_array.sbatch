@@ -14,7 +14,6 @@
 #
 # Environment variables expected:
 #   PARQUET_LIST_FILE: Path to file containing list of parquet files (one per line)
-#   RAW_DIR: Directory containing tar files
 #   OUTPUT_DIR: Directory for output embedding Parquet files
 #   PROJECT_ROOT: Path to project root directory (optional, will auto-detect if not set)
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
@@ -23,6 +22,9 @@
 #   Note: MODEL_NAME and BATCH_SIZE come from config.toml only
 
 set -euo pipefail
+
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
 
 # Log job information
 echo "=========================================="
@@ -34,80 +36,37 @@ echo "Node: ${SLURM_NODELIST}"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=========================================="
 
-# Step 1: Clean environment (best practice)
-module purge
+# Step 1: Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
 # Step 2: Load CUDA module (required for GPU)
 if command -v nvidia-smi &> /dev/null; then
     echo "CUDA/nvidia-smi available"
 else
-    echo "Error: CUDA not available - GPU is required" >&2
-    exit 1
+    error_exit "CUDA not available - GPU is required"
 fi
 
-# Step 3: Load Arrow module (required for PyArrow, must be loaded before Python/venv)
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
-fi
-
-
-# Step 4: Load Python module
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-else
-    echo "Warning: PYTHON_MODULE not set, using system Python"
-fi
-
-# Step 5: Activate Python virtual environment (if using venv)
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python (no virtual environment)"
-fi
-
-# Step 6: Verify GPU is available
+# Step 3: Verify GPU is available
 echo "Verifying GPU availability..."
 if ! python -c "import torch; assert torch.cuda.is_available(), 'GPU not available'; print(f'GPU available: {torch.cuda.get_device_name(0)}')" 2>/dev/null; then
-    echo "Error: GPU is not available - this job requires a GPU" >&2
-    exit 1
+    error_exit "GPU is not available - this job requires a GPU"
 fi
 
-# Step 7: Get parquet file path from list file using SLURM_ARRAY_TASK_ID
+# Step 4: Get parquet file path from list file using SLURM_ARRAY_TASK_ID
 if [ ! -f "${PARQUET_LIST_FILE}" ]; then
-    echo "Error: Parquet list file not found: ${PARQUET_LIST_FILE}" >&2
-    exit 1
+    error_exit "Parquet list file not found: ${PARQUET_LIST_FILE}"
 fi
 
 PARQUET_FILE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" "${PARQUET_LIST_FILE}")
 
 if [ -z "${PARQUET_FILE}" ]; then
-    echo "Error: No parquet file found at task ID ${SLURM_ARRAY_TASK_ID}" >&2
-    exit 1
+    error_exit "No parquet file found at task ID ${SLURM_ARRAY_TASK_ID}"
 fi
 
 echo "Processing parquet file: ${PARQUET_FILE}"
 
-# Step 8: Determine project root - prefer explicit env, otherwise fall back to script location
-if [ -n "${PROJECT_ROOT:-}" ]; then
-    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
-else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-fi
-
-echo "Using project root: ${PROJECT_ROOT}"
-
 if [ ! -f "${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" ]; then
-    echo "Error: generate_embeddings.py not found at ${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" >&2
-    exit 1
+    error_exit "generate_embeddings.py not found at ${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -116,8 +75,7 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 # Locate base config file
 BASE_CONFIG="${PROJECT_ROOT}/config.toml"
 if [ ! -f "${BASE_CONFIG}" ]; then
-    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
-    exit 1
+    error_exit "Base config file not found: ${BASE_CONFIG}"
 fi
 
 # Use SLURM_TMPDIR (node-local storage) for extraction if available
@@ -125,13 +83,13 @@ fi
 EXTRACT_DIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/extract_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${EXTRACT_DIR}"
 
-# Step 9: Check if output already exists (resume capability)
+# Step 5: Check if output already exists (resume capability)
 # Extract embeddings_dir from config.toml for checking existing files
-EMBEDDINGS_DIR=$(awk -F'=' '/^embeddings_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${BASE_CONFIG}" | head -1)
+EMBEDDINGS_DIR=$(read_toml_value "${BASE_CONFIG}" "paths" "embeddings_dir")
 if [ -z "${EMBEDDINGS_DIR}" ]; then
-    # Fallback to default if not found
     EMBEDDINGS_DIR="data/embeddings"
 fi
+
 PARQUET_BASENAME=$(basename "${PARQUET_FILE}" .parquet)
 OUTPUT_FILE="${EMBEDDINGS_DIR}/${PARQUET_BASENAME}_embeddings.parquet"
 
@@ -140,7 +98,7 @@ if [ -f "${OUTPUT_FILE}" ]; then
     exit 0
 fi
 
-# Step 10: Run processing script with base config and CLI args
+# Step 6: Run processing script with base config and CLI args
 echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
 # Ensure cleanup on exit
@@ -159,7 +117,7 @@ srun python -m generate_embeddings.generate_embeddings \
 
 EXIT_CODE=$?
 
-# Step 10: Error handling
+# Step 7: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "Error: Processing failed with exit code ${EXIT_CODE}" >&2
     echo "End time: $(date '+%Y-%m-%d %H:%M:%S')"

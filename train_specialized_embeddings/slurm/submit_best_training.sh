@@ -17,10 +17,6 @@
 #   --log-dir <PATH>            Override log directory (default: train_specialized_embeddings/logs/best_training)
 #   --help                      Show this message
 #
-# Examples:
-#   ./submit_best_training.sh --account def-someuser --config config.toml
-#   ./submit_best_training.sh --account def-someuser --config /path/to/custom_config.toml
-#
 # Exit codes:
 #   0: Success
 #   1: Invalid arguments or missing required options
@@ -32,33 +28,7 @@
 
 set -euo pipefail
 
-# Colours for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Colour
-
-error_exit() {
-    echo -e "${RED}Error:${NC} $1" >&2
-    exit "${2:-1}"
-}
-
-info() {
-    echo -e "${GREEN}Info:${NC} $1"
-}
-
-warning() {
-    echo -e "${YELLOW}Warning:${NC} $1"
-}
-
-show_usage() {
-    grep "^# " "${0}" | sed 's/^# //' | head -n 100
-    exit 0
-}
-
-resolve_abs_path() {
-    python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$1"
-}
+source "$(dirname "${BASH_SOURCE[0]}")/../../slurm/common.sh"
 
 # Defaults
 ACCOUNT="${SLURM_ACCOUNT:-}"
@@ -73,57 +43,25 @@ PROJECT_ROOT=""
 NO_VENV=false
 LOG_DIR=""
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+show_usage() {
+    grep "^# " "${0}" | sed 's/^# //' | head -n 100
+    exit 0
+}
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --account)
-            ACCOUNT="$2"
-            shift 2
-            ;;
-        --config)
-            CONFIG_PATH="$2"
-            shift 2
-            ;;
-        --time)
-            TIME_LIMIT="$2"
-            shift 2
-            ;;
-        --mem)
-            MEM="$2"
-            shift 2
-            ;;
-        --cpus)
-            CPUS="$2"
-            shift 2
-            ;;
-        --python-module)
-            PYTHON_MODULE="$2"
-            shift 2
-            ;;
-        --venv-path)
-            VENV_PATH="$2"
-            shift 2
-            ;;
-        --no-venv)
-            NO_VENV=true
-            shift
-            ;;
-        --project-root)
-            PROJECT_ROOT="$2"
-            shift 2
-            ;;
-        --log-dir)
-            LOG_DIR="$2"
-            shift 2
-            ;;
-        --help)
-            show_usage
-            ;;
-        *)
-            error_exit "Unknown option: $1" 1
-            ;;
+        --account) ACCOUNT="$2"; shift 2 ;;
+        --config) CONFIG_PATH="$2"; shift 2 ;;
+        --time) TIME_LIMIT="$2"; shift 2 ;;
+        --mem) MEM="$2"; shift 2 ;;
+        --cpus) CPUS="$2"; shift 2 ;;
+        --python-module) PYTHON_MODULE="$2"; shift 2 ;;
+        --venv-path) VENV_PATH="$2"; shift 2 ;;
+        --no-venv) NO_VENV=true; shift ;;
+        --project-root) PROJECT_ROOT="$2"; shift 2 ;;
+        --log-dir) LOG_DIR="$2"; shift 2 ;;
+        --help) show_usage ;;
+        *) error_exit "Unknown option: $1" 1 ;;
     esac
 done
 
@@ -132,15 +70,10 @@ if [ -z "${ACCOUNT}" ]; then
 fi
 
 # Resolve project root
-if [ -z "${PROJECT_ROOT}" ]; then
-    PROJECT_ROOT="${DEFAULT_PROJECT_ROOT}"
+PROJECT_ROOT=$(resolve_project_root "${PROJECT_ROOT}" "${SCRIPT_DIR}")
+if [ -z "${PROJECT_ROOT}" ] || [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
+    error_exit "Project root not found (pyproject.toml). Use --project-root." 5
 fi
-PROJECT_ROOT="$(resolve_abs_path "${PROJECT_ROOT}")"
-
-if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
-    error_exit "Project root does not contain pyproject.toml: ${PROJECT_ROOT}" 5
-fi
-
 info "Project root: ${PROJECT_ROOT}"
 
 # Determine default paths
@@ -149,10 +82,12 @@ if [ -z "${CONFIG_PATH}" ]; then
 fi
 CONFIG_PATH="$(resolve_abs_path "${CONFIG_PATH}")"
 
+# Log dir logic: if provided, use it. If not, try config.toml. If not there, use default.
 if [ -z "${LOG_DIR}" ]; then
-    LOG_DIR="${PROJECT_ROOT}/train_specialized_embeddings/logs/best_training"
+    LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "train_specialized_embeddings/logs/best_training")
+else
+    LOG_DIR="$(resolve_abs_path "${LOG_DIR}")"
 fi
-LOG_DIR="$(resolve_abs_path "${LOG_DIR}")"
 
 info "Config file: ${CONFIG_PATH}"
 info "Log directory: ${LOG_DIR}"
@@ -164,65 +99,16 @@ fi
 
 mkdir -p "${LOG_DIR}"
 
-# Environment setup (venv optional)
-if [ "${NO_VENV}" = false ]; then
-    if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
-        error_exit "Python module not available: ${PYTHON_MODULE}" 3
-    fi
-
-    if [ -n "${ARROW_MODULE}" ]; then
-        info "Loading Arrow module: ${ARROW_MODULE}"
-        module load gcc 2>/dev/null || true
-        module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may be unavailable"
-    fi
-
-    if [ -d "${VENV_PATH}" ]; then
-        info "Using existing virtual environment: ${VENV_PATH}"
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        if ! python -c "import pandas, torch, wandb" 2>/dev/null; then
-            warning "Key packages missing, reinstalling dependencies..."
-            if ! command -v uv >/dev/null 2>&1; then
-                info "Installing uv..."
-                pip install uv || error_exit "Failed to install uv" 4
-            fi
-            cd "${PROJECT_ROOT}"
-            uv pip install -e . || error_exit "Failed to reinstall project dependencies" 4
-            info "Dependencies reinstalled"
-        else
-            info "Dependencies verified"
-        fi
-        deactivate
-    else
-        info "Creating virtual environment: ${VENV_PATH}"
-        module load "${PYTHON_MODULE}"
-        if ! command -v uv >/dev/null 2>&1; then
-            info "Installing uv..."
-            pip install uv || error_exit "Failed to install uv" 4
-        fi
-        uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        cd "${PROJECT_ROOT}"
-        uv pip install -e . || error_exit "Failed to install project dependencies" 4
-        deactivate
-        info "Virtual environment created and dependencies installed"
-    fi
-else
-    info "Using system Python (--no-venv specified)"
-    if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
-        error_exit "Python module not available: ${PYTHON_MODULE}" 3
-    fi
-    VENV_PATH=""
-fi
+# Environment setup
+setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,torch,wandb"
 
 # Build sbatch parameters
 SBATCH_SCRIPT="${SCRIPT_DIR}/train_best.sbatch"
 
 EXPORT_VARS="ALL,PROJECT_ROOT=${PROJECT_ROOT},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},CONFIG_PATH=${CONFIG_PATH}"
-
-if [ -n "${VENV_PATH:-}" ]; then
+if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi
-
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
@@ -258,7 +144,7 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "  tail -f ${LOG_DIR}/best_training_${JOB_ID}.out"
     echo "  tail -f ${LOG_DIR}/best_training_${JOB_ID}.err"
     echo "=========================================="
+    exit 0
 else
     error_exit "Job submission failed: ${SUBMIT_OUTPUT}" 6
 fi
-

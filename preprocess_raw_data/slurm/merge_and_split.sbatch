@@ -25,6 +25,9 @@
 
 set -euo pipefail
 
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
+
 # Log job information
 echo "=========================================="
 echo "Merge and Split Job Information"
@@ -34,108 +37,64 @@ echo "Node: ${SLURM_NODELIST}"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=========================================="
 
-# Step 1: Clean environment (best practice)
-module purge
+# Step 1: Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
-# Step 2: Load Arrow module (required for PyArrow, must be loaded before Python/venv)
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
-fi
-
-# Step 3: Load Python module
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-else
-    echo "Warning: PYTHON_MODULE not set, using system Python"
-fi
-
-# Step 4: Activate Python virtual environment (if using venv)
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python (no virtual environment)"
-fi
-
-# Step 5: Validate required environment variables
+# Step 2: Validate required environment variables
 if [ -z "${INTERMEDIATES_DIR:-}" ]; then
-    echo "Error: INTERMEDIATES_DIR not set" >&2
-    exit 1
+    error_exit "INTERMEDIATES_DIR not set"
 fi
 
 if [ -z "${OUTPUT_DIR:-}" ]; then
-    echo "Error: OUTPUT_DIR not set" >&2
-    exit 1
+    error_exit "OUTPUT_DIR not set"
 fi
 
 if [ -z "${EMBEDDINGS_DIR:-}" ]; then
-    echo "Error: EMBEDDINGS_DIR not set" >&2
-    exit 1
+    error_exit "EMBEDDINGS_DIR not set"
 fi
 
 echo "Intermediates directory: ${INTERMEDIATES_DIR}"
 echo "Output directory: ${OUTPUT_DIR}"
 echo "Embeddings directory: ${EMBEDDINGS_DIR}"
 
-# Step 6: Check if intermediates directory exists and contains files
+# Step 3: Check if intermediates directory exists and contains files
 if [ ! -d "${INTERMEDIATES_DIR}" ]; then
-    echo "Error: Intermediates directory not found: ${INTERMEDIATES_DIR}" >&2
-    exit 1
+    error_exit "Intermediates directory not found: ${INTERMEDIATES_DIR}"
 fi
 
 PARQUET_COUNT=$(find "${INTERMEDIATES_DIR}" -name "*.parquet" -type f | wc -l)
 if [ "${PARQUET_COUNT}" -eq 0 ]; then
-    echo "Error: No Parquet files found in ${INTERMEDIATES_DIR}" >&2
-    exit 1
+    error_exit "No Parquet files found in ${INTERMEDIATES_DIR}"
 fi
 
 echo "Found ${PARQUET_COUNT} intermediate Parquet files"
 
 EMBEDDING_COUNT=$(find "${EMBEDDINGS_DIR}" -name "*_embeddings.parquet" -type f | wc -l)
 if [ "${EMBEDDING_COUNT}" -eq 0 ]; then
-    echo "Error: No embedding Parquet files found in ${EMBEDDINGS_DIR}" >&2
-    exit 1
+    error_exit "No embedding Parquet files found in ${EMBEDDINGS_DIR}"
 fi
 
 if [ "${EMBEDDING_COUNT}" -ne "${PARQUET_COUNT}" ]; then
-    echo "Warning: Found ${EMBEDDING_COUNT} embedding files but ${PARQUET_COUNT} intermediate files"
+    warning "Found ${EMBEDDING_COUNT} embedding files but ${PARQUET_COUNT} intermediate files"
 fi
 
-# Step 7: Resolve project root and configure Python path
-if [ -n "${PROJECT_ROOT:-}" ]; then
-    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
-elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/pyproject.toml" ]; then
-    PROJECT_ROOT="$(cd "${SLURM_SUBMIT_DIR}" && pwd)"
-else
-    SCRIPT_DIR_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "${SCRIPT_DIR_SOURCE}/../.." && pwd)"
-fi
-
+# Step 4: Verify script exists
 if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" ]; then
-    echo "Error: merge_and_split.py not found at ${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" >&2
-    exit 1
+    error_exit "merge_and_split.py not found at ${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py"
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 echo "Project root: ${PROJECT_ROOT}"
 
-# Step 8: Locate base config file
+# Step 5: Locate base config file
 BASE_CONFIG="${PROJECT_ROOT}/config.toml"
 if [ ! -f "${BASE_CONFIG}" ]; then
-    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
-    exit 1
+    error_exit "Base config file not found: ${BASE_CONFIG}"
 fi
 
 echo "Using base config file: ${BASE_CONFIG}"
 
-# Step 9: Run merge and split script with base config
+# Step 6: Run merge and split script with base config
 echo "Starting merge and split at $(date '+%Y-%m-%d %H:%M:%S')"
 
 python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
@@ -143,7 +102,7 @@ python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
 
 EXIT_CODE=$?
 
-# Step 10: Error handling
+# Step 7: Error handling
 if [ ${EXIT_CODE} -ne 0 ]; then
     echo "Error: Merge and split failed with exit code ${EXIT_CODE}" >&2
     echo "End time: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -153,4 +112,3 @@ fi
 echo "Merge and split completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
 
 exit 0
-

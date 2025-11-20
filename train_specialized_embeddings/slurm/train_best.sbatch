@@ -16,6 +16,9 @@
 
 set -euo pipefail
 
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
+
 echo "=========================================="
 echo "Best Hyperparameters Training Job Information"
 echo "=========================================="
@@ -25,48 +28,25 @@ echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Config file: ${CONFIG_PATH}"
 echo "=========================================="
 
-module purge
+# Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
+# Load CUDA module (required for GPU)
 if command -v nvidia-smi &> /dev/null; then
     echo "CUDA/nvidia-smi available"
 else
-    echo "Error: CUDA not available - worker requires GPU access" >&2
-    exit 1
-fi
-
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module"
-fi
-
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-fi
-
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python"
+    error_exit "CUDA not available - worker requires GPU access"
 fi
 
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
 if [ -z "${CONFIG_PATH:-}" ]; then
-    echo "Error: Required environment variable CONFIG_PATH is not set" >&2
-    exit 1
+    error_exit "Required environment variable CONFIG_PATH is not set"
 fi
 
 if [ ! -f "${CONFIG_PATH}" ]; then
-    echo "Error: Config file not found at ${CONFIG_PATH}" >&2
-    exit 1
+    error_exit "Config file not found at ${CONFIG_PATH}"
 fi
 
 CMD=(
@@ -84,4 +64,3 @@ EXIT_CODE=$?
 echo "Job finished with exit code ${EXIT_CODE} at $(date '+%Y-%m-%d %H:%M:%S')"
 
 exit "${EXIT_CODE}"
-

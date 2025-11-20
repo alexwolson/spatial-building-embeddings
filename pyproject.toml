@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "spatial-building-embeddings"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Unified pipeline for preprocessing, embedding generation, difficulty banding, and triplet training of spatial building datasets."
 requires-python = ">=3.11"
 dependencies = [
     "black>=25.11.0",

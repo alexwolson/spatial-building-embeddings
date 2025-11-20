@@ -5,12 +5,9 @@
 # and submits a SLURM job array to generate embeddings in parallel.
 #
 # Usage:
-#   ./submit_embedding_jobs.sh --intermediates-dir /path/to/intermediates --raw-dir /path/to/raw --output-dir /path/to/output --account <ACCOUNT>
+#   ./submit_embedding_jobs.sh --account <ACCOUNT>
 #
 # Options:
-#   --intermediates-dir <DIR>  Directory containing intermediate parquet files (default: data/intermediates)
-#   --raw-dir <DIR>            Directory containing tar files (default: data/raw)
-#   --output-dir <DIR>         Directory for output embedding parquet files (default: data/embeddings)
 #   --account <ACCOUNT>        SLURM account name (required, or use SLURM_ACCOUNT env var)
 #   --time <TIME>              Time limit per job (default: 4:00:00)
 #   --max-concurrent <N>       Maximum concurrent jobs (default: unlimited, let SLURM decide)
@@ -24,18 +21,6 @@
 #   --test                     Submit only 0061.parquet for testing (smallest file)
 #   --help                     Show this help message
 #
-# Examples:
-#   # Basic usage with automatic venv creation
-#   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings --account <ACCOUNT>
-#
-#   # Test with 0061.parquet (smallest file) first
-#   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings \
-#       --account <ACCOUNT> --test
-#
-#   # Use existing venv
-#   ./submit_embedding_jobs.sh --intermediates-dir data/intermediates --raw-dir data/raw --output-dir data/embeddings \
-#       --account <ACCOUNT> --venv-path ~/venv/myenv
-#
 # Exit codes:
 #   0: Success
 #   1: Invalid arguments or missing required options
@@ -47,47 +32,23 @@
 
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/../../slurm/common.sh"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default values
-INTERMEDIATES_DIR=""
-RAW_DIR=""
-OUTPUT_DIR=""
 ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="24:00:00"
-MAX_CONCURRENT=""  # Empty = unlimited (let SLURM scheduler decide based on resources)
+MAX_CONCURRENT=""
 MEM_PER_CPU="48G"
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
-ARROW_MODULE="arrow/17.0.0"  # Arrow module for PyArrow (required on Alliance clusters)
-# Note: huggingface_hub is pinned to <1.0.0 in pyproject.toml to avoid hf-xet dependency
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ARROW_MODULE="arrow/17.0.0"
+PROJECT_ROOT=""
 NO_VENV=false
 TEST_MODE=false
 
-# Colours for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Colour
-
-# Function to print error and exit
-error_exit() {
-    echo -e "${RED}Error:${NC} $1" >&2
-    exit "${2:-1}"
-}
-
-# Function to print info
-info() {
-    echo -e "${GREEN}Info:${NC} $1"
-}
-
-# Function to print warning
-warning() {
-    echo -e "${YELLOW}Warning:${NC} $1"
-}
-
-# Function to show usage
 show_usage() {
     grep "^# " "${0}" | sed 's/^# //' | head -n 30
     exit 0
@@ -96,26 +57,8 @@ show_usage() {
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --intermediates-dir)
-            INTERMEDIATES_DIR="$2"
-            shift 2
-            ;;
-        --raw-dir)
-            RAW_DIR="$2"
-            shift 2
-            ;;
-        --output-dir)
-            OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --account)
-            ACCOUNT="$2"
-            shift 2
-            ;;
-        --time)
-            TIME="$2"
-            shift 2
-            ;;
+        --account) ACCOUNT="$2"; shift 2 ;;
+        --time) TIME="$2"; shift 2 ;;
         --max-concurrent)
             if [ -z "$2" ] || [ "$2" = "unlimited" ]; then
                 MAX_CONCURRENT=""
@@ -124,68 +67,36 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --mem-per-cpu)
-            MEM_PER_CPU="$2"
-            shift 2
-            ;;
-        --resume)
-            RESUME=true
-            shift
-            ;;
-        --venv-path)
-            VENV_PATH="$2"
-            shift 2
-            ;;
-        --python-module)
-            PYTHON_MODULE="$2"
-            shift 2
-            ;;
-        --project-root)
-            PROJECT_ROOT="$2"
-            shift 2
-            ;;
-        --no-venv)
-            NO_VENV=true
-            shift
-            ;;
-        --test)
-            TEST_MODE=true
-            shift
-            ;;
-        --help)
-            show_usage
-            ;;
-        *)
-            error_exit "Unknown option: $1" 1
-            ;;
+        --mem-per-cpu) MEM_PER_CPU="$2"; shift 2 ;;
+        --resume) RESUME=true; shift ;;
+        --venv-path) VENV_PATH="$2"; shift 2 ;;
+        --python-module) PYTHON_MODULE="$2"; shift 2 ;;
+        --project-root) PROJECT_ROOT="$2"; shift 2 ;;
+        --no-venv) NO_VENV=true; shift ;;
+        --test) TEST_MODE=true; shift ;;
+        --help) show_usage ;;
+        *) error_exit "Unknown option: $1" 1 ;;
     esac
 done
 
-# Validate required arguments
 if [ -z "${ACCOUNT}" ]; then
     error_exit " --account is required (or set SLURM_ACCOUNT environment variable)" 1
 fi
 
 # Step 1: Validate project root
-PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
-if [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
-    error_exit "Project root does not contain pyproject.toml: ${PROJECT_ROOT}" 5
+PROJECT_ROOT=$(resolve_project_root "${PROJECT_ROOT}" "${SCRIPT_DIR}")
+if [ -z "${PROJECT_ROOT}" ] || [ ! -f "${PROJECT_ROOT}/pyproject.toml" ]; then
+    error_exit "Project root not found (pyproject.toml). Use --project-root." 5
 fi
-
 info "Project root: ${PROJECT_ROOT}"
 
-# Step 2: Set default directories if not provided
-if [ -z "${INTERMEDIATES_DIR}" ]; then
-    INTERMEDIATES_DIR="${PROJECT_ROOT}/data/intermediates"
-fi
+# Step 2: Read paths from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+INTERMEDIATES_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "intermediates_dir")
+OUTPUT_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "embeddings_dir")
 
-if [ -z "${RAW_DIR}" ]; then
-    RAW_DIR="${PROJECT_ROOT}/data/raw"
-fi
-
-if [ -z "${OUTPUT_DIR}" ]; then
-    OUTPUT_DIR="${PROJECT_ROOT}/data/embeddings"
-fi
+if [ -z "${INTERMEDIATES_DIR}" ]; then error_exit "intermediates_dir not found in [paths] section of config.toml" 1; fi
+if [ -z "${OUTPUT_DIR}" ]; then error_exit "embeddings_dir not found in [paths] section of config.toml" 1; fi
 
 # Step 3: Validate input directories
 if [ ! -d "${INTERMEDIATES_DIR}" ]; then
@@ -199,115 +110,18 @@ fi
 
 info "Found ${PARQUET_COUNT} parquet file(s) in ${INTERMEDIATES_DIR}"
 
-if [ ! -d "${RAW_DIR}" ]; then
-    error_exit "Raw directory does not exist: ${RAW_DIR}" 2
-fi
-
-# Step 4: Setup Python environment (if not using --no-venv)
-if [ "${NO_VENV}" = false ]; then
-    # Check if Python module is available
-    if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
-        error_exit "Python module not available: ${PYTHON_MODULE}. Check with 'module avail python'" 3
-    fi
-    
-    # Load Arrow module before venv operations (required for PyArrow)
-    if [ -n "${ARROW_MODULE}" ]; then
-        info "Loading Arrow module: ${ARROW_MODULE}"
-        # Load gcc first (required by Arrow module)
-        module load gcc 2>/dev/null || true
-        module load "${ARROW_MODULE}" || warning "Failed to load Arrow module - PyArrow may not be available"
-    fi
-    
-    # Check if venv exists
-    if [ -d "${VENV_PATH}" ]; then
-        info "Virtual environment exists: ${VENV_PATH}"
-        info "Verifying dependencies..."
-        
-        # Activate and check for key packages
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        
-        # Check for all required dependencies including torch and timm
-        if ! python -c "import pandas, rich, pydantic, PIL, torch, timm" 2>/dev/null; then
-            warning "Key packages missing, reinstalling dependencies..."
-            # Install uv if not available
-            if ! command -v uv &> /dev/null; then
-                info "Installing uv..."
-                pip install uv || error_exit "Failed to install uv" 4
-            fi
-            cd "${PROJECT_ROOT}"
-            # Use Alliance wheelhouse directories if available (same as pip does)
-            WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-            uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to reinstall dependencies" 4
-            info "Dependencies reinstalled"
-        else
-            info "Dependencies verified"
-        fi
-        deactivate
-    else
-        info "Creating virtual environment: ${VENV_PATH}"
-        
-        # Load Python module
-        module load "${PYTHON_MODULE}"
-        
-        # Install uv if not available
-        if ! command -v uv &> /dev/null; then
-            info "Installing uv..."
-            pip install uv || error_exit "Failed to install uv" 4
-        fi
-        
-        # Create venv using uv (Arrow module should already be loaded)
-        uv venv "${VENV_PATH}" || error_exit "Failed to create virtual environment" 4
-        
-        # Activate and install dependencies
-        source "${VENV_PATH}/bin/activate" || error_exit "Failed to activate virtual environment" 4
-        
-        cd "${PROJECT_ROOT}"
-        # Use Alliance wheelhouse directories if available (same as pip does)
-        WHEELHOUSE_DIRS="/cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v4 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/x86-64-v3 /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/gentoo2023/generic /cvmfs/soft.computecanada.ca/custom/python/wheelhouse/generic"
-        uv pip install -e . --find-links ${WHEELHOUSE_DIRS} || error_exit "Failed to install project dependencies" 4
-        
-        deactivate
-        
-        info "Virtual environment created and dependencies installed"
-    fi
-else
-    info "Using system Python (--no-venv flag set)"
-    if ! module avail "${PYTHON_MODULE}" 2>/dev/null | grep -q "${PYTHON_MODULE}"; then
-        error_exit "Python module not available: ${PYTHON_MODULE}" 3
-    fi
-    VENV_PATH=""  # Clear VENV_PATH for system Python
-fi
+# Step 4: Setup Python environment
+setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,rich,pydantic,PIL,torch,timm"
 
 info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
-# Extract log_dir from config.toml
-CONFIG_FILE="${PROJECT_ROOT}/config.toml"
-if [ ! -f "${CONFIG_FILE}" ]; then
-    error_exit "Config file not found: ${CONFIG_FILE}" 1
-fi
-# Extract log_dir from config.toml (remove quotes and whitespace)
-LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
-if [ -z "${LOG_DIR}" ]; then
-    error_exit "log_dir not found in config.toml" 1
-fi
-# Resolve relative path if needed (relative to PROJECT_ROOT)
-if [[ "${LOG_DIR}" != /* ]]; then
-    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
-fi
+
+LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "")
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
-# Verify directories were created
-if [ ! -d "${OUTPUT_DIR}" ]; then
-    error_exit "Output directory does not exist: ${OUTPUT_DIR}" 2
-fi
-if [ ! -d "${LOG_DIR}" ]; then
-    error_exit "Log directory does not exist: ${LOG_DIR}" 2
-fi
-
 info "Intermediates directory: ${INTERMEDIATES_DIR}"
-info "Raw directory: ${RAW_DIR}"
 info "Output directory: ${OUTPUT_DIR}"
 info "Log directory: ${LOG_DIR}"
 
@@ -353,7 +167,6 @@ fi
 if [ "${TEST_MODE}" = true ]; then
     info "Test mode: looking for 0061.parquet (smallest file for testing)"
     TEST_FILE=""
-    # Look for 0061.parquet in the list
     while IFS= read -r PARQUET_FILE; do
         PARQUET_BASENAME=$(basename "${PARQUET_FILE}" .parquet)
         if [ "${PARQUET_BASENAME}" = "0061" ]; then
@@ -380,22 +193,19 @@ info "Submitting job array for ${NUM_PARQUETS} parquet file(s)"
 SBATCH_SCRIPT="${SCRIPT_DIR}/generate_embeddings_array.sbatch"
 
 # Build export string - include PROJECT_ROOT and other variables
-# Note: MODEL_NAME and BATCH_SIZE come from config.toml only
-EXPORT_VARS="ALL,PARQUET_LIST_FILE=${PARQUET_LIST_FILE},RAW_DIR=${RAW_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
-if [ -n "${VENV_PATH:-}" ]; then
+# RAW_DIR is no longer needed if paths are absolute/managed by config
+EXPORT_VARS="ALL,PARQUET_LIST_FILE=${PARQUET_LIST_FILE},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
+if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
 fi
 
-# Submit job
-# Note: --account, --time, --array, --mem-per-cpu, and log paths are specified on command line and override script defaults
-# Build array specification: with or without concurrency limit
 if [ -n "${MAX_CONCURRENT}" ]; then
     ARRAY_SPEC="1-${NUM_PARQUETS}%${MAX_CONCURRENT}"
 else
-    ARRAY_SPEC="1-${NUM_PARQUETS}"  # No limit - let SLURM scheduler decide
+    ARRAY_SPEC="1-${NUM_PARQUETS}"
 fi
 
 SUBMIT_OUTPUT=$(sbatch \
@@ -408,11 +218,9 @@ SUBMIT_OUTPUT=$(sbatch \
     --export="${EXPORT_VARS}" \
     "${SBATCH_SCRIPT}" 2>&1)
 
-# Extract job ID
 if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     JOB_ID=$(echo "${SUBMIT_OUTPUT}" | grep -oE '[0-9]+' | head -n 1)
     
-    # Step 10: Print submission summary
     echo ""
     echo "=========================================="
     echo "Job Submission Summary"
@@ -421,11 +229,9 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "Number of tasks: ${NUM_PARQUETS}"
     echo "Max concurrent: ${MAX_CONCURRENT:-unlimited}"
     echo "Time limit: ${TIME}"
-    echo "Model and batch size: from config.toml"
     echo "Intermediates directory: ${INTERMEDIATES_DIR}"
-    echo "Raw directory: ${RAW_DIR}"
     echo "Output directory: ${OUTPUT_DIR}"
-    if [ -n "${VENV_PATH}" ]; then
+    if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH}" ]; then
         echo "Virtual environment: ${VENV_PATH}"
     else
         echo "Python: System Python (${PYTHON_MODULE})"

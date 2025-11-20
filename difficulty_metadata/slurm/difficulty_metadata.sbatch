@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
+
 echo "=========================================="
 echo "Difficulty Metadata Job Information"
 echo "=========================================="
@@ -29,65 +32,25 @@ echo "Node: ${SLURM_NODELIST}"
 echo "Start time: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "=========================================="
 
-module purge
-
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module - PyArrow may not be available"
-fi
-
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-else
-    echo "Warning: PYTHON_MODULE not set, using system Python"
-fi
-
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python (no virtual environment)"
-fi
+# Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
 if [ -z "${INPUT_DATASET_PATH:-}" ]; then
-    echo "Error: INPUT_DATASET_PATH not set" >&2
-    exit 1
+    error_exit "INPUT_DATASET_PATH not set"
 fi
 
 if [ -z "${OUTPUT_FILE:-}" ]; then
-    echo "Error: OUTPUT_FILE not set" >&2
-    exit 1
+    error_exit "OUTPUT_FILE not set"
 fi
 
 if [ ! -d "${INPUT_DATASET_PATH}" ]; then
-    if [ -f "${INPUT_DATASET_PATH}" ]; then
-        echo "Warning: INPUT_DATASET_PATH points to a single file; expected a directory"
-    else
-        echo "Error: Input dataset path not found: ${INPUT_DATASET_PATH}" >&2
-        exit 1
-    fi
+    error_exit "Input dataset path not found: ${INPUT_DATASET_PATH}"
 fi
 
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
-if [ -n "${PROJECT_ROOT:-}" ]; then
-    PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
-elif [ -n "${SLURM_SUBMIT_DIR:-}" ] && [ -f "${SLURM_SUBMIT_DIR}/pyproject.toml" ]; then
-    PROJECT_ROOT="$(cd "${SLURM_SUBMIT_DIR}" && pwd)"
-else
-    SCRIPT_DIR_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PROJECT_ROOT="$(cd "${SCRIPT_DIR_SOURCE}/../.." && pwd)"
-fi
-
 if [ ! -f "${PROJECT_ROOT}/difficulty_metadata/compute_neighbors.py" ]; then
-    echo "Error: compute_neighbors.py not found at ${PROJECT_ROOT}/difficulty_metadata/compute_neighbors.py" >&2
-    exit 1
+    error_exit "compute_neighbors.py not found at ${PROJECT_ROOT}/difficulty_metadata/compute_neighbors.py"
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
@@ -98,8 +61,7 @@ echo "Output file: ${OUTPUT_FILE}"
 # Locate base config file
 BASE_CONFIG="${PROJECT_ROOT}/config.toml"
 if [ ! -f "${BASE_CONFIG}" ]; then
-    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
-    exit 1
+    error_exit "Base config file not found: ${BASE_CONFIG}"
 fi
 
 echo "Using base config file: ${BASE_CONFIG}"
@@ -120,5 +82,3 @@ echo "Difficulty metadata computation completed successfully at $(date '+%Y-%m-%
 echo "Log file: ${LOG_FILE}"
 
 exit 0
-
-

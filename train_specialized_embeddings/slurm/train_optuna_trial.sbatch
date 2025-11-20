@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+# Load shared functions
+source "${PROJECT_ROOT}/slurm/common.sh"
+
 echo "=========================================="
 echo "Optuna Worker Information"
 echo "=========================================="
@@ -33,35 +36,13 @@ echo "Trial output root: ${TRIAL_OUTPUT_ROOT}"
 echo "Trials per worker: ${TRIALS_PER_WORKER}"
 echo "=========================================="
 
-module purge
+# Setup environment
+load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
 if command -v nvidia-smi &> /dev/null; then
     echo "CUDA/nvidia-smi available"
 else
-    echo "Error: CUDA not available - worker requires GPU access" >&2
-    exit 1
-fi
-
-if [ -n "${ARROW_MODULE:-}" ]; then
-    echo "Loading Arrow module: ${ARROW_MODULE}"
-    module load gcc 2>/dev/null || true
-    module load "${ARROW_MODULE}" || echo "Warning: Failed to load Arrow module"
-fi
-
-if [ -n "${PYTHON_MODULE:-}" ]; then
-    echo "Loading Python module: ${PYTHON_MODULE}"
-    module load "${PYTHON_MODULE}"
-fi
-
-if [ -n "${VENV_PATH:-}" ]; then
-    if [ ! -d "${VENV_PATH}" ]; then
-        echo "Error: Virtual environment not found at ${VENV_PATH}" >&2
-        exit 1
-    fi
-    echo "Activating virtual environment: ${VENV_PATH}"
-    source "${VENV_PATH}/bin/activate"
-else
-    echo "Using system Python"
+    error_exit "CUDA not available - worker requires GPU access"
 fi
 
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
@@ -69,14 +50,12 @@ export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
 for required_var in STUDY_NAME STORAGE_URL BASE_CONFIG_PATH TRIAL_OUTPUT_ROOT TRIALS_PER_WORKER; do
     if [ -z "${!required_var:-}" ]; then
-        echo "Error: Required environment variable ${required_var} is not set" >&2
-        exit 1
+        error_exit "Required environment variable ${required_var} is not set"
     fi
 done
 
 if [ ! -f "${BASE_CONFIG_PATH}" ]; then
-    echo "Error: Base config not found at ${BASE_CONFIG_PATH}" >&2
-    exit 1
+    error_exit "Base config not found at ${BASE_CONFIG_PATH}"
 fi
 
 VERBOSITY="${OPTUNA_WORKER_VERBOSITY:-20}"
@@ -123,4 +102,3 @@ EXIT_CODE=$?
 echo "Worker finished with exit code ${EXIT_CODE} at $(date '+%Y-%m-%d %H:%M:%S')"
 
 exit "${EXIT_CODE}"
-
