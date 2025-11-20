@@ -3,7 +3,7 @@
 Generate image embeddings for a single intermediate parquet file using a pretrained DINOv2 model.
 
 This script reads an intermediate parquet file, extracts the corresponding tar file,
-loads images, generates embeddings using timm, and writes output parquet file with embeddings.
+loads images, generates embeddings using transformers, and writes output parquet file with embeddings.
 """
 
 import argparse
@@ -13,12 +13,9 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, NamedTuple, Sequence
+from typing import Callable, Sequence
 
 # Add project root to sys.path before imports
-# This ensures imports work when script is run directly
-# When Python runs a script, it adds the script's directory to sys.path[0],
-# which can interfere with package imports even when PYTHONPATH is set
 script_dir = Path(__file__).parent
 project_root = script_dir.parent
 if str(project_root) not in sys.path:
@@ -38,7 +35,7 @@ from rich.progress import (
     BarColumn,
     TaskProgressColumn,
 )
-import timm
+from transformers import AutoModel, AutoImageProcessor
 
 from config import GenerateEmbeddingsConfig, load_config_from_file
 
@@ -83,15 +80,15 @@ def validate_gpu_available() -> None:
     )
 
 
-def load_model_and_transforms(model_name: str) -> tuple[nn.Module, nn.Module]:
+def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
     """
-    Load pretrained model and get model-specific transforms.
+    Load pretrained model and processor from Hugging Face.
 
     Args:
-        model_name: Timm model name (e.g., 'vit_base_patch14_dinov2.lvd142m')
+        model_name: Hugging Face model ID (e.g., 'facebook/dinov2-base')
 
     Returns:
-        Tuple of (model, transform)
+        Tuple of (model, transform_function)
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Loading model: {model_name}")
@@ -100,18 +97,29 @@ def load_model_and_transforms(model_name: str) -> tuple[nn.Module, nn.Module]:
     validate_gpu_available()
     device = torch.device("cuda")
 
-    # Load model with num_classes=0 to remove classifier and get features directly
-    model = timm.create_model(model_name, pretrained=True, num_classes=0)
-    model.eval()
-    model = model.to(device)
+    # Load Processor
+    try:
+        processor = AutoImageProcessor.from_pretrained(model_name)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load processor for {model_name}: {e}")
 
-    # Get model-specific transforms using recommended approach
-    data_config = timm.data.resolve_model_data_config(model)
-    transform = timm.data.create_transform(**data_config, is_training=False)
+    # Load Model
+    try:
+        model = AutoModel.from_pretrained(model_name)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model {model_name}: {e}")
+
+    model.eval()
+    model.to(device)
+
     logger.info(f"Model loaded and moved to {device}")
-    logger.info(
-        f"Transform config: input_size={data_config.get('input_size', 'unknown')}"
-    )
+
+    # Create a transform wrapper that converts PIL image to tensor
+    def transform(image: Image.Image) -> torch.Tensor:
+        # processor returns dict with 'pixel_values' of shape [1, C, H, W]
+        # We want [C, H, W] to be stacked by DataLoader later
+        inputs = processor(images=image, return_tensors="pt")
+        return inputs["pixel_values"][0]
 
     return model, transform
 
@@ -120,7 +128,7 @@ class ImageDataset(torch.utils.data.Dataset):
     """Dataset for loading images from paths."""
 
     def __init__(
-        self, image_paths: list[Path], transform: nn.Module, extract_dir: Path
+        self, image_paths: list[Path], transform: Callable, extract_dir: Path
     ):
         self.image_paths = image_paths
         self.transform = transform
@@ -219,7 +227,7 @@ def _format_duration(seconds: float) -> str:
 def generate_embeddings_batch(
     images: list[Path],
     model: nn.Module,
-    transform: nn.Module,
+    transform: Callable,
     batch_size: int,
     extract_dir: Path,
     logger: logging.Logger,
@@ -275,15 +283,22 @@ def generate_embeddings_batch(
 
             for batch_images in dataloader:
                 # Move batch to GPU
+                # batch_images is [batch, channels, height, width]
                 batch_images = batch_images.to(device, non_blocking=True)
 
-                # Forward pass - with num_classes=0, model() returns (batch_size, num_features)
-                # This is the recommended approach per timm documentation
-                output = model(batch_images)
-                if isinstance(output, tuple):
-                    embeddings = output[0]
+                # Forward pass
+                # HF models take 'pixel_values' and return a custom output object
+                outputs = model(pixel_values=batch_images)
+                
+                # For DINOv2/ViT, we typically use the CLS token (first token of last hidden state)
+                # Some models have a 'pooler_output', but for raw embeddings, CLS is standard.
+                if hasattr(outputs, "last_hidden_state"):
+                     embeddings = outputs.last_hidden_state[:, 0]
+                elif hasattr(outputs, "pooler_output"):
+                     embeddings = outputs.pooler_output
                 else:
-                    embeddings = output
+                     # Fallback for some configurations, though unlikely for DINOv2
+                     embeddings = outputs[0]
 
                 # Move to CPU and convert to numpy
                 embeddings_np = embeddings.cpu().numpy().astype(np.float32)
@@ -346,7 +361,7 @@ def process_intermediate_file(
         parquet_path: Path to intermediate parquet file
         tar_path: Path to corresponding tar file
         output_dir: Directory for output embedding parquet files
-        model_name: Timm model name
+        model_name: Hugging Face model name
         batch_size: Batch size for inference
         temp_dir: Temporary directory for extraction (optional)
         log_file: Optional log file path
@@ -363,7 +378,6 @@ def process_intermediate_file(
 
     # Validate GPU is available
     validate_gpu_available()
-    device = torch.device("cuda")
 
     # Statistics
     stats = {
@@ -409,8 +423,8 @@ def process_intermediate_file(
                     f"Sample extracted image path: {sample_files[0].relative_to(temp_extract_dir)}"
                 )
 
-        # Load model and transforms
-        model, transform = load_model_and_transforms(model_name)
+        # Load model and processor
+        model, transform = load_model_and_processor(model_name)
 
         # Get image paths from dataframe
         image_paths = df["image_path"].astype(str)
@@ -423,10 +437,10 @@ def process_intermediate_file(
 
         valid_indices: list[int] = []
         valid_image_paths: list[Path] = []
-        missing_example: Path | None = None
-        invalid_example: str | None = None
         missing_file_count = 0
         invalid_path_count = 0
+        missing_example = None
+        invalid_example = None
 
         for idx, raw_rel_path in enumerate(image_paths.tolist()):
             try:
@@ -494,10 +508,7 @@ def process_intermediate_file(
             raise
 
         # Create output dataframe with embeddings
-        # Only include rows with valid images
         df_output = df.iloc[valid_indices].copy()
-
-        # Convert embeddings to list of lists for parquet storage
         embeddings_list = [emb.tolist() for emb in embeddings]
         df_output["embedding"] = embeddings_list
 
@@ -525,10 +536,8 @@ def process_intermediate_file(
         return stats
 
     finally:
-        # Clean up temporary directory
         if should_cleanup and temp_extract_dir.exists():
             import shutil
-
             shutil.rmtree(temp_extract_dir)
             logger.info(f"Cleaned up temporary directory: {temp_extract_dir}")
 
@@ -545,26 +554,20 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-
-    # Set up logger early (before config loading to catch config errors)
     logger = setup_logging(None)
 
-    # Load configuration
     try:
         if args.config:
             config = load_config_from_file(args.config, "generate_embeddings")
         else:
-            # Load from environment variables
             config = GenerateEmbeddingsConfig()
     except Exception as e:
         logger.error(f"Error loading configuration: {e}")
         return 1
 
-    # Re-setup logger with log file if specified
     if config.log_file:
         logger = setup_logging(config.log_file)
 
-    # Validate inputs
     if not config.parquet_file.exists():
         logger.error(f"Parquet file not found: {config.parquet_file}")
         return 1
@@ -576,7 +579,6 @@ def main() -> int:
     if not config.tar_file.suffix == ".tar":
         logger.warning(f"File does not have .tar extension: {config.tar_file}")
 
-    # Process file
     try:
         stats = process_intermediate_file(
             parquet_path=config.parquet_file,
@@ -588,7 +590,6 @@ def main() -> int:
             log_file=config.log_file,
         )
 
-        # Print summary
         logger.info("")
         logger.info("Processing Summary:")
         logger.info(f"  Total entries: {stats['total_entries']:,}")
