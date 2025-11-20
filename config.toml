@@ -66,7 +66,7 @@ parquet_file = "data/intermediates/0061.parquet"
 output_dir = "data/embeddings"
 
 # Timm model name
-model_name = "facebook/dinov2-base"
+model_name = "nomic-ai/nomic-embed-vision-v1.5"
 
 # Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)
 batch_size = 128

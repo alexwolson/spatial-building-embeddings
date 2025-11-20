@@ -99,13 +99,13 @@ def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
 
     # Load Processor
     try:
-        processor = AutoImageProcessor.from_pretrained(model_name)
+        processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=True)
     except Exception as e:
         raise RuntimeError(f"Failed to load processor for {model_name}: {e}")
 
     # Load Model
     try:
-        model = AutoModel.from_pretrained(model_name)
+        model = AutoModel.from_pretrained(model_name, trust_remote_code=True, safe_serialization=True)
     except Exception as e:
         raise RuntimeError(f"Failed to load model {model_name}: {e}")
 

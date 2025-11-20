@@ -27,7 +27,8 @@ from config import (
     load_config_from_file,
 )
 from train_specialized_embeddings.datasets import TripletDataset
-from train_specialized_embeddings.model import EmbeddingProjector, TripletLossWrapper
+from publish_model.modeling_spatial_embeddings import EmbeddingProjector
+from train_specialized_embeddings.loss import TripletLossWrapper
 
 
 LOGGER_NAME = "train_specialized_embeddings"

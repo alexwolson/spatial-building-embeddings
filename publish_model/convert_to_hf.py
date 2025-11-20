@@ -30,19 +30,8 @@ def main():
     logger.info(f"Architecture: {train_config.input_dim} -> {train_config.hidden_dim} -> {train_config.output_dim}")
 
     # 2. Create HF Config
-    # Map 'vit_base_patch14_dinov2.lvd142m' to HF hub name if necessary
-    # Timm names don't always match HF names. 
-    # 'vit_base_patch14_dinov2.lvd142m' corresponds to 'facebook/dinov2-base' typically.
-    # We'll try to infer or allow manual override. 
-    # For now, mapping common DINOv2 names:
-    timm_to_hf = {
-        "vit_small_patch14_dinov2.lvd142m": "facebook/dinov2-small",
-        "vit_base_patch14_dinov2.lvd142m": "facebook/dinov2-base",
-        "vit_large_patch14_dinov2.lvd142m": "facebook/dinov2-large",
-        "vit_giant_patch14_dinov2.lvd142m": "facebook/dinov2-giant",
-    }
-    hf_backbone = timm_to_hf.get(embed_config.model_name, "facebook/dinov2-base")
-    logger.info(f"Mapped timm model '{embed_config.model_name}' to HF model '{hf_backbone}'")
+    hf_backbone = embed_config.model_name
+    logger.info(f"Using backbone: {hf_backbone}")
 
     hf_config = SpatialEmbeddingsConfig(
         backbone_model_name=hf_backbone,
