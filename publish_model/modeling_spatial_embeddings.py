@@ -135,10 +135,12 @@ class SpatialEmbeddingsModel(PreTrainedModel):
     def __init__(self, config: SpatialEmbeddingsConfig):
         super().__init__(config)
         self.config = config
-        
+
         # Initialize backbone
-        self.backbone = AutoModel.from_pretrained(config.backbone_model_name, trust_remote_code=True, safe_serialization=True)
-        
+        self.backbone = AutoModel.from_pretrained(
+            config.backbone_model_name, trust_remote_code=True, safe_serialization=True
+        )
+
         # Initialize projector
         self.projector = EmbeddingProjector(
             input_dim=config.input_dim,
@@ -153,23 +155,23 @@ class SpatialEmbeddingsModel(PreTrainedModel):
         )
 
     def forward(
-        self, 
+        self,
         pixel_values: Optional[torch.Tensor] = None,
         return_dict: Optional[bool] = None,
-        **kwargs
+        **kwargs,
     ) -> Union[Tuple, torch.Tensor]:
         """
         Args:
             pixel_values: Tensor of shape (batch_size, channels, height, width)
             return_dict: Whether to return a dictionary or tuple
-        
+
         Returns:
             If return_dict is True (default for HF), returns object with 'embeddings'.
             Otherwise returns (embeddings,).
         """
         # Pass through backbone
         outputs = self.backbone(pixel_values=pixel_values, return_dict=True, **kwargs)
-        
+
         # Extract pooled output (CLS token or similar)
         # DINOv2 outputs pooler_output in some versions, or last_hidden_state
         if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
@@ -184,4 +186,3 @@ class SpatialEmbeddingsModel(PreTrainedModel):
         if return_dict:
             return {"embeddings": specialized_emb, "backbone_outputs": outputs}
         return (specialized_emb,)
-

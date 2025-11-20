@@ -29,4 +29,3 @@ class SpatialEmbeddingsConfig(PretrainedConfig):
         self.use_residual = use_residual
         self.use_layer_norm = use_layer_norm
         super().__init__(**kwargs)
-

@@ -4,6 +4,7 @@ from PIL import Image
 import requests
 from pathlib import Path
 
+
 def main():
     model_path = Path(__file__).parent.parent / "published_model"
     if not model_path.exists():
@@ -29,25 +30,25 @@ def main():
     image = None
     try:
         # Check for a local image in data/raw/ or similar if accessible, but let's use a reliable web image for the demo
-        url = 'http://images.cocodataset.org/val2017/000000039769.jpg'
+        url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         image = Image.open(requests.get(url, stream=True).raw)
         print("Loaded sample image from web.")
     except Exception as e:
         print(f"Could not load sample image: {e}")
         # Create dummy image
-        image = Image.new('RGB', (224, 224), color='red')
+        image = Image.new("RGB", (224, 224), color="red")
         print("Created dummy image.")
 
     # Preprocess
     inputs = processor(images=image, return_tensors="pt")
-    
+
     # Inference
     print("Running inference...")
     with torch.no_grad():
         outputs = model(**inputs)
         # The model returns a tuple (embeddings,) or dict if return_dict=True
         if isinstance(outputs, dict):
-            embeddings = outputs['embeddings']
+            embeddings = outputs["embeddings"]
         else:
             embeddings = outputs[0]
 
@@ -55,6 +56,6 @@ def main():
     print(f"Embedding norm: {torch.norm(embeddings, dim=1).item():.4f} (Expected ~1.0)")
     print("Success!")
 
+
 if __name__ == "__main__":
     main()
-

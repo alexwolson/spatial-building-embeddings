@@ -32,7 +32,6 @@ EARTH_RADIUS_METERS = 6_371_008.8
 MIN_CALIBRATION_SAMPLE = 10_000
 FULL_DATASET_CALIBRATION_THRESHOLD = 250_000
 CALIBRATION_PERCENTILES = np.array([5, 10, 20, 40, 60, 85], dtype=np.float64)
-RNG_SEED = 42
 
 
 def _extract_positive_local_scales(
@@ -359,7 +358,7 @@ def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
     logger.info("Difficulty metadata computation: starting")
     logger.info("=" * 60)
 
-    buildings = load_buildings(config.input_parquet_path, logger)
+    buildings = load_buildings(config.merged_dir, logger)
     total_buildings = buildings.building_ids.size
     if total_buildings <= config.neighbors:
         raise ValueError(
@@ -382,7 +381,9 @@ def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
         config.k0_for_local_scale,
         logger=logger,
     )
-    rng = np.random.default_rng(RNG_SEED)
+    # Use seed from config (inherits from global seed if not set)
+    seed = config.seed if config.seed is not None else 42
+    rng = np.random.default_rng(seed)
     edges = calibrate_band_edges(
         distances=distances,
         k0=config.k0_for_local_scale,
@@ -409,13 +410,13 @@ def compute_difficulty_metadata(config: DifficultyMetadataConfig) -> None:
         neighbour_indices=indices,
         neighbour_distances=distances,
         bands=bands,
-        output_path=config.output_parquet_path,
+        output_path=config.difficulty_metadata_path,
         row_group_size=config.row_group_size,
         distance_dtype=config.distance_dtype,
         metadata=metadata,
     )
 
-    logger.info("Wrote difficulty metadata to %s", config.output_parquet_path)
+    logger.info("Wrote difficulty metadata to %s", config.difficulty_metadata_path)
     logger.info("Difficulty metadata computation complete")
 
 

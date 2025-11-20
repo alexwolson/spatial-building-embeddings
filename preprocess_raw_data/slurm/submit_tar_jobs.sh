@@ -271,8 +271,20 @@ info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/../logs"
+# Extract log_dir from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${CONFIG_FILE}" ]; then
+    error_exit "Config file not found: ${CONFIG_FILE}" 1
+fi
+# Extract log_dir from config.toml (remove quotes and whitespace)
+LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
+if [ -z "${LOG_DIR}" ]; then
+    error_exit "log_dir not found in config.toml" 1
+fi
+# Resolve relative path if needed (relative to PROJECT_ROOT)
+if [[ "${LOG_DIR}" != /* ]]; then
+    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
+fi
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 # Verify directories were created

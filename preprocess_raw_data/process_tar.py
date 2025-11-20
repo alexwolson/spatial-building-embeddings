@@ -342,6 +342,17 @@ def main() -> int:
         type=Path,
         help="Path to TOML config file. If not provided, config is loaded from environment variables.",
     )
+    # Per-job arguments (override config if provided)
+    parser.add_argument(
+        "--tar-file",
+        type=Path,
+        help="Path to tar file to process (overrides config)",
+    )
+    parser.add_argument(
+        "--temp-dir",
+        type=Path,
+        help="Temporary directory for extraction (overrides config)",
+    )
 
     args = parser.parse_args()
 
@@ -359,6 +370,12 @@ def main() -> int:
         logger.error(f"Error loading configuration: {e}")
         return 1
 
+    # Override with command-line arguments if provided
+    if args.tar_file is not None:
+        config.tar_file = args.tar_file
+    if args.temp_dir is not None:
+        config.temp_dir = args.temp_dir
+
     # Re-setup logger with log file if specified
     if config.log_file:
         logger = setup_logging(config.log_file)
@@ -374,7 +391,7 @@ def main() -> int:
     # Process tar file
     stats = process_tar_file(
         tar_path=config.tar_file,
-        output_dir=config.output_dir,
+        output_dir=config.intermediates_dir,
         temp_dir=config.temp_dir,
         log_file=config.log_file,
     )

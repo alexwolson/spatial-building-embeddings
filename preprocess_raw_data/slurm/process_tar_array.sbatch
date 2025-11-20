@@ -76,21 +76,7 @@ fi
 
 echo "Processing tar file: ${TAR_FILE}"
 
-# Step 5: Check if output already exists (resume capability)
-# Normalize OUTPUT_DIR to remove trailing slashes
-OUTPUT_DIR="${OUTPUT_DIR%/}"
-TAR_BASENAME=$(basename "${TAR_FILE}")
-OUTPUT_FILE="${OUTPUT_DIR}/${TAR_BASENAME}.parquet"
-
-if [ -f "${OUTPUT_FILE}" ]; then
-    echo "Skipping ${TAR_FILE} - output already exists: ${OUTPUT_FILE}"
-    exit 0
-fi
-
-# Step 6: Create config file and run processing script
-echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
-
-# Determine project root - use environment variable if set, otherwise auto-detect
+# Step 5: Determine project root - use environment variable if set, otherwise auto-detect
 if [ -z "${PROJECT_ROOT:-}" ]; then
     # Get the directory where this script is located
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -107,18 +93,38 @@ fi
 # Add project root to PYTHONPATH so imports work
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
+# Locate base config file
+BASE_CONFIG="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${BASE_CONFIG}" ]; then
+    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
+    exit 1
+fi
+
 # Use SLURM_TMPDIR (node-local storage) for extraction if available
 # This reduces memory pressure and improves I/O performance for large tar files
 EXTRACT_DIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/extract_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${EXTRACT_DIR}"
 
-# Create temporary config file in temp directory
-CONFIG_DIR="${TMPDIR:-/tmp}"
-CONFIG_FILE="${CONFIG_DIR}/process_tar_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.toml"
+# Step 6: Check if output already exists (resume capability)
+# Extract intermediates_dir from config.toml for checking existing files
+INTERMEDIATES_DIR=$(awk -F'=' '/^intermediates_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${BASE_CONFIG}" | head -1)
+if [ -z "${INTERMEDIATES_DIR}" ]; then
+    # Fallback to default if not found
+    INTERMEDIATES_DIR="data/intermediates"
+fi
+TAR_BASENAME=$(basename "${TAR_FILE}")
+OUTPUT_FILE="${INTERMEDIATES_DIR}/${TAR_BASENAME}.parquet"
+
+if [ -f "${OUTPUT_FILE}" ]; then
+    echo "Skipping ${TAR_FILE} - output already exists: ${OUTPUT_FILE}"
+    exit 0
+fi
+
+# Step 7: Run processing script with base config and CLI args
+echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
 # Ensure cleanup on exit
 cleanup() {
-    rm -f "${CONFIG_FILE}"
     # Clean up extraction directory if it exists
     if [ -d "${EXTRACT_DIR}" ]; then
         rm -rf "${EXTRACT_DIR}"
@@ -126,15 +132,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cat > "${CONFIG_FILE}" << EOF
-[process_tar]
-tar_file = "${TAR_FILE}"
-output_dir = "${OUTPUT_DIR}"
-temp_dir = "${EXTRACT_DIR}"
-EOF
-
 python "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" \
-    --config "${CONFIG_FILE}"
+    --config "${BASE_CONFIG}" \
+    --tar-file "${TAR_FILE}" \
+    --temp-dir "${EXTRACT_DIR}"
 
 EXIT_CODE=$?
 

@@ -1,145 +1,94 @@
 # Unified configuration file for the spatial building embeddings pipeline
 # This is the actual configuration file for this project.
 #
-# This file contains:
+# This file is organized by type of configuration rather than by workflow:
 # - [global] section: Shared settings used across all workflows
-# - Workflow-specific sections: [process_tar], [merge_and_split], [generate_embeddings], 
-#   [triplet_training], [difficulty_metadata]
+# - [paths] section: All pipeline file and directory paths
+# - [embedding_model] section: Model settings for embedding generation
+# - [training_model] section: Model architecture settings for training
+# - [training] section: Training hyperparameters and settings
+# - [data] section: Data processing settings (splits, neighbors, etc.)
+# - [infrastructure] section: Device, workers, and performance settings
+# - [logging] section: Logging and monitoring settings
 #
-# Global values are automatically merged into workflow configs, but workflow-specific
-# values take precedence.
+# Workflows automatically read from the relevant sections based on their needs.
 
 [global]
 # Random seed for reproducibility (used by workflows that don't specify their own seed)
 seed = 42
 
-# Optional directory for log files
-# If set, workflows will create log files here unless they specify their own log_file
-# If null, workflows use their own log_file settings or no logging
+# Base directory for all log files (mandatory)
+# All workflows will create log files within this directory
 log_dir = "logs"
 
-[process_tar]
-# Path to tar file to process
-# Note: This is typically set per-job in SLURM scripts, but can be specified here for manual runs
-tar_file = "data/raw/0061.tar"
+[paths]
+# Pipeline directory paths (shared across workflows)
+intermediates_dir = "data/intermediates"      # Output of process_tar, input to merge_and_split
+embeddings_dir = "data/embeddings"            # Output of generate_embeddings, input to merge_and_split
+merged_dir = "data/merged"                    # Output of merge_and_split, input to difficulty_metadata and triplet_training
 
-# Output directory for intermediate Parquet files
-output_dir = "data/intermediates"
-
-# Optional log file path (overrides global log_dir if set)
-# log_file = "logs/process_tar.log"
-
-# Optional temporary directory for extraction
-# temp_dir = "/tmp/extract"
-
-[merge_and_split]
-# Directory containing intermediate Parquet files
-intermediates_dir = "data/intermediates"
-
-# Directory for final output Parquet files
-output_dir = "data/merged"
-
-# Directory containing per-tar embedding Parquet files
-embeddings_dir = "data/embeddings"
-
-# Training set ratio (must sum to 1.0 with val_ratio and test_ratio)
-train_ratio = 0.7
-
-# Validation set ratio
-val_ratio = 0.15
-
-# Test set ratio
-test_ratio = 0.15
-
-# Optional log file path (overrides global log_dir if set)
-# log_file = "logs/merge_and_split.log"
-
-[generate_embeddings]
-# Path to intermediate parquet file to process
-# Note: This is typically set per-job in SLURM scripts, but can be specified here for manual runs
-parquet_file = "data/intermediates/0061.parquet"
-
-# Optional: tar file path (auto-detect if None)
-# tar_file = "data/raw/0061.tar"
-
-# Output directory for embedding parquet files
-output_dir = "data/embeddings"
-
-# Timm model name
-model_name = "nomic-ai/nomic-embed-vision-v1.5"
-
-# Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)
-batch_size = 128
-
-# Optional temporary directory for extraction
-# temp_dir = "/tmp/extract"
-
-# Optional log file path (overrides global log_dir if set)
-# log_file = "logs/generate_embeddings.log"
-
-[triplet_training]
-# Note: Many hyperparameters (model architecture, training, UCB sampler) are typically
-# determined by Optuna hyperparameter tuning and have defaults in the code. Only the
-# essential configuration is shown here. See the code for all available options.
-
-# Data paths (required)
+# Training data paths
 train_parquet_path = "data/merged/train.parquet"
 val_parquet_path = "data/merged/val.parquet"
-difficulty_metadata_path = "data/difficulty/difficulty_metadata.parquet"
+difficulty_metadata_path = "data/difficulty/difficulty_metadata.parquet"  # Output of difficulty_metadata, input to triplet_training
+
+# Training output paths
 checkpoint_dir = "checkpoints/triplet"
 
-# Optional: Directory for saving final embeddings
-# output_embeddings_dir = "data/specialized_embeddings"
+[embedding_model]
+# Model settings for embedding generation (generate_embeddings workflow)
+model_name = "nomic-ai/nomic-embed-vision-v1.5"
+batch_size = 128  # Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)
 
-# Model architecture (fixed dimensions)
-input_dim = 768          # DINOv2 base embedding dimension
-output_dim = 256         # Output embedding dimension
+[training_model]
+input_dim = 768          # nomic-embed-vision-v1.5 embedding dimension (fixed)
+output_dim = 256         # Output embedding dimension (fixed)
 
-# Training infrastructure
-device = "auto"          # Device: "cuda", "cpu", or "auto"
-num_workers = 4          # Number of data loader workers
-pin_memory = true        # Pin memory for data loader
+[training]
+num_epochs = 50         # Number of training epochs
 
 # Checkpointing and validation
 save_every_n_epochs = 5      # Save checkpoint every N epochs
 validate_every_n_epochs = 1  # Run validation every N epochs
 resume_from_checkpoint = null  # Path to checkpoint to resume from (optional)
-early_stopping_patience = 0  # Validations with no improvement before stopping (0 disables)
+early_stopping_patience = 3  # Validations with no improvement before stopping (0 disables)
 
 # Retrieval metrics
 retrieval_metric_top_k = [1, 5, 10, 100, 1000]
-retrieval_metric_max_queries = 4096  # Base value for Optuna tuning (Optuna may tune around this)
+retrieval_metric_max_queries = 4096
 retrieval_metric_per_building_limit = 4
 
-# Logging
-# Optional log file path (overrides global log_dir if set)
-# log_file = "logs/triplet_training.log"
-log_every_n_batches = 100  # Log metrics every N batches
+# Best training configuration (for fetch_best_and_train.py)
+best_training_trial_name_pattern = ".*-trial-.*"  # Regex pattern to match Optuna trial run names in WandB
+best_training_metric_name = "val/retrieval_recall@100"  # Metric name to use for selecting best run from WandB
+
+[data]
+# Data processing settings
+# Split ratios (must sum to 1.0)
+train_ratio = 0.7
+val_ratio = 0.15
+test_ratio = 0.15
+
+# Difficulty metadata parameters
+neighbors = 150                    # Number of neighbours to retain per anchor
+k0_for_local_scale = 50           # Neighbour rank used to define the local scale L(a)
+sample_fraction_for_bands = 0.03  # Fraction of anchors sampled to calibrate band edges
+
+[infrastructure]
+# Device and performance settings
+# device, num_workers, and pin_memory are determined dynamically in the code
+
+# Difficulty metadata performance settings
+distance_dtype = "float32"  # Floating point precision: "float32" or "float64"
+batch_size = 100000         # Number of anchors to process per BallTree query batch (for difficulty_metadata)
+row_group_size = 50000      # Row group size for the output parquet writer
+
+[logging]
+# Logging and monitoring settings
+log_every_n_batches = 100  # Log metrics every N batches (for training)
 
 # Weights & Biases configuration
 wandb_enabled = true        # Enable Weights & Biases logging
 wandb_project = "spatial-building-embeddings"  # wandb project name
 wandb_run_name = null       # Optional explicit run name (null = auto-generate)
 wandb_mode = "online"       # Use "online" to sync immediately, "offline" to defer
-
-# Best training configuration (for fetch_best_and_train.py)
-best_training_trial_name_pattern = ".*-trial-.*"  # Regex pattern to match Optuna trial run names in WandB
-best_training_metric_name = "val/retrieval_recall@100"  # Metric name to use for selecting best run from WandB
-
-[difficulty_metadata]
-# Directory or dataset path containing train/val/test parquet outputs
-input_parquet_path = "data/merged"
-
-# Destination parquet file for aggregated difficulty metadata
-output_parquet_path = "data/difficulty/difficulty_metadata.parquet"
-
-# Neighbor search parameters
-neighbors = 150
-k0_for_local_scale = 50
-sample_fraction_for_bands = 0.03
-
-# Performance and storage
-distance_dtype = "float32"  # Floating point precision: "float32" or "float64"
-batch_size = 100000         # Number of anchors to process per BallTree query batch
-row_group_size = 50000      # Row group size for the output parquet writer
-

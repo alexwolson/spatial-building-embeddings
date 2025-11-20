@@ -11,6 +11,7 @@ import argparse
 import json
 import logging
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -70,6 +71,38 @@ def set_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def get_data_loader_config(device: torch.device) -> tuple[int, bool]:
+    """
+    Determine num_workers and pin_memory based on available CPU cores.
+    
+    Checks SLURM_CPUS_PER_TASK first (for SLURM jobs), then falls back to
+    os.cpu_count(). pin_memory is True for CUDA devices, False otherwise.
+    
+    Args:
+        device: The torch device being used
+        
+    Returns:
+        Tuple of (num_workers, pin_memory)
+    """
+    # Check SLURM_CPUS_PER_TASK first (for SLURM jobs)
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus:
+        try:
+            num_workers = int(slurm_cpus)
+        except ValueError:
+            num_workers = os.cpu_count() or 1
+    else:
+        num_workers = os.cpu_count() or 1
+    
+    # Ensure at least 1 worker, but cap at available CPUs
+    num_workers = max(1, min(num_workers, os.cpu_count() or 1))
+    
+    # pin_memory is beneficial for CUDA devices
+    pin_memory = device.type == "cuda"
+    
+    return num_workers, pin_memory
 
 
 def load_data(
@@ -188,6 +221,7 @@ def compute_retrieval_metrics(
     top_k: tuple[int, ...] = (1, 5, 10, 100, 1000),
     max_queries: int = 512,
     per_building_limit: int = 4,
+    seed: int = 0,
 ) -> dict[str, float]:
     """
     Compute building retrieval Recall@K on the validation split.
@@ -213,13 +247,10 @@ def compute_retrieval_metrics(
         logger.warning(
             "Retrieval metric skipped: no buildings with at least two samples available."
         )
-        return {
-            f"retrieval_recall@{k}": float("nan")
-            for k in top_k
-        }
+        return {f"retrieval_recall@{k}": float("nan") for k in top_k}
 
     eligible_array = np.array(eligible_indices, dtype=np.int64)
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(seed)
     rng.shuffle(eligible_array)
     if max_queries > 0 and eligible_array.size > max_queries:
         eligible_array = eligible_array[:max_queries]
@@ -227,10 +258,7 @@ def compute_retrieval_metrics(
     num_embeddings = val_dataset.embeddings.size(0)
     if num_embeddings <= 1:
         logger.warning("Retrieval metric skipped: not enough validation embeddings.")
-        return {
-            f"retrieval_recall@{k}": float("nan")
-            for k in top_k
-        }
+        return {f"retrieval_recall@{k}": float("nan") for k in top_k}
 
     # Project all validation embeddings once.
     model.eval()
@@ -252,10 +280,7 @@ def compute_retrieval_metrics(
         logger.warning(
             "Retrieval metric skipped: not enough candidates after removing the query entry."
         )
-        return {
-            f"retrieval_recall@{k}": float("nan")
-            for k in top_k
-        }
+        return {f"retrieval_recall@{k}": float("nan") for k in top_k}
 
     hits = {k: 0 for k in sorted_top_k}
     total_queries = 0
@@ -280,15 +305,9 @@ def compute_retrieval_metrics(
 
     if total_queries == 0:
         logger.warning("Retrieval metric skipped: no eligible validation queries.")
-        return {
-            f"retrieval_recall@{k}": float("nan")
-            for k in top_k
-        }
+        return {f"retrieval_recall@{k}": float("nan") for k in top_k}
 
-    metrics = {
-        f"retrieval_recall@{k}": hits[k] / total_queries
-        for k in sorted_top_k
-    }
+    metrics = {f"retrieval_recall@{k}": hits[k] / total_queries for k in sorted_top_k}
     metrics["retrieval_query_count"] = float(total_queries)
 
     logger.info(
@@ -345,64 +364,6 @@ def load_checkpoint(
     return epoch
 
 
-def save_embeddings(
-    model: nn.Module,
-    embeddings_df: pd.DataFrame,
-    output_dir: Path,
-    device: torch.device,
-    logger: logging.Logger,
-    batch_size: int = 1000,
-):
-    """
-    Save projected embeddings to parquet file.
-
-    Args:
-        model: Trained model
-        embeddings_df: DataFrame with original embeddings
-        output_dir: Output directory
-        device: Device to run on
-        logger: Logger instance
-        batch_size: Batch size for processing
-    """
-    logger.info("Computing and saving projected embeddings...")
-    model.eval()
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    if embeddings_df.empty:
-        logger.warning(
-            "No embeddings available to project for %s; skipping.", output_dir
-        )
-        return
-
-    embeddings_array = np.stack(embeddings_df["embedding"].to_numpy()).astype(
-        np.float32, copy=False
-    )
-
-    projected_chunks: list[np.ndarray] = []
-
-    with torch.no_grad():
-        for start in range(0, len(embeddings_array), batch_size):
-            batch_embeddings = embeddings_array[start : start + batch_size]
-            batch_tensor = torch.from_numpy(batch_embeddings).to(device)
-            batch_projected = model(batch_tensor).cpu().numpy()
-            projected_chunks.append(batch_projected)
-
-    projected_embeddings = np.concatenate(projected_chunks, axis=0)
-
-    # Create output dataframe (retain original embeddings for downstream analysis)
-    output_df = embeddings_df.copy()
-    output_df["specialized_embedding"] = projected_embeddings.tolist()
-
-    # Save to parquet
-    output_file = output_dir / "specialized_embeddings.parquet"
-    output_df.to_parquet(
-        output_file, engine="pyarrow", compression="snappy", index=False
-    )
-
-    logger.info(f"Saved {len(output_df):,} projected embeddings to: {output_file}")
-
-
 def train(config: TripletTrainingConfig) -> int:
     """Main training function."""
     wandb_run: Any | None = None
@@ -443,15 +404,15 @@ def train(config: TripletTrainingConfig) -> int:
         set_seed(config.seed)
         logger.info(f"Random seed: {config.seed}")
 
-        # Determine device
-        if config.device == "auto":
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            device = torch.device(config.device)
-
+        # Determine device (always auto-detect)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {device}")
         if device.type == "cuda":
             logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+
+        # Determine data loader configuration based on available CPU cores
+        num_workers, pin_memory = get_data_loader_config(device)
+        logger.info(f"Data loader: num_workers={num_workers}, pin_memory={pin_memory}")
 
         # Load data
         train_df, val_df, difficulty_df = load_data(config, logger)
@@ -466,8 +427,8 @@ def train(config: TripletTrainingConfig) -> int:
             train_dataset,
             batch_size=config.batch_size,
             shuffle=True,
-            num_workers=config.num_workers,
-            pin_memory=config.pin_memory,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
         )
 
         # Initialize model
@@ -600,8 +561,8 @@ def train(config: TripletTrainingConfig) -> int:
                     device,
                     logger,
                     batch_size=config.batch_size,
-                    num_workers=config.num_workers,
-                    pin_memory=config.pin_memory,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
                 )
                 val_loss = val_metrics["val_loss"]
 
@@ -613,6 +574,7 @@ def train(config: TripletTrainingConfig) -> int:
                     config.retrieval_metric_top_k,
                     config.retrieval_metric_max_queries,
                     config.retrieval_metric_per_building_limit,
+                    seed=config.seed if config.seed is not None else 0,
                 )
                 val_metrics.update(retrieval_metrics)
 
@@ -715,17 +677,6 @@ def train(config: TripletTrainingConfig) -> int:
         save_checkpoint(
             model, optimizer, final_epoch, metrics, final_checkpoint_path, logger
         )
-
-        # Save embeddings if requested
-        if config.output_embeddings_dir:
-            logger.info("Saving final embeddings...")
-            # Save for both train and val splits
-            save_embeddings(
-                model, train_df, config.output_embeddings_dir / "train", device, logger
-            )
-            save_embeddings(
-                model, val_df, config.output_embeddings_dir / "val", device, logger
-            )
 
         logger.info("=" * 60)
         logger.info("Training complete!")

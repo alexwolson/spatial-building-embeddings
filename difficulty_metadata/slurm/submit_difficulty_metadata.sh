@@ -18,13 +18,9 @@
 #   --mem <MEM>                Memory requirement (default: 220G)
 #   --cpus <N>                 CPUs to request (default: 32)
 #   --dependency <JOB_ID>      Job ID(s) to wait for before starting
-#   --neighbors <N>            Number of neighbours per building (default: 150)
-#   --k0 <N>                   Rank for local scale L(a) (default: 50)
-#   --sample-fraction <F>      Fraction of anchors sampled for calibration (default: 0.03)
-#   --batch-size <N>           Number of anchors processed per query batch (default: 100000)
-#   --row-group-size <N>       Row group size for parquet writer (default: 50000)
-#   --distance-dtype <TYPE>    Distance dtype: float32 or float64 (default: float32)
 #   --venv-path <DIR>          Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
+#   Note: All hyperparameters (neighbors, k0, sample-fraction, batch-size, row-group-size,
+#         distance-dtype) come from config.toml only
 #   --python-module <MODULE>   Python module to load (default: python/3.12)
 #   --arrow-module <MODULE>    Arrow module to load (default: arrow/17.0.0)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
@@ -53,12 +49,6 @@ TIME="00:10:00"
 MEM="220G"
 CPUS=32
 DEPENDENCY=""
-NEIGHBORS=1000
-K0_FOR_LOCAL_SCALE=50
-SAMPLE_FRACTION="0.03"
-BATCH_SIZE=100000
-ROW_GROUP_SIZE=50000
-DISTANCE_DTYPE="float32"
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"
@@ -134,30 +124,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dependency)
             DEPENDENCY="$2"
-            shift 2
-            ;;
-        --neighbors)
-            NEIGHBORS="$2"
-            shift 2
-            ;;
-        --k0)
-            K0_FOR_LOCAL_SCALE="$2"
-            shift 2
-            ;;
-        --sample-fraction)
-            SAMPLE_FRACTION="$2"
-            shift 2
-            ;;
-        --batch-size)
-            BATCH_SIZE="$2"
-            shift 2
-            ;;
-        --row-group-size)
-            ROW_GROUP_SIZE="$2"
-            shift 2
-            ;;
-        --distance-dtype)
-            DISTANCE_DTYPE="$2"
             shift 2
             ;;
         --venv-path)
@@ -261,35 +227,8 @@ OUTPUT_FILE="$(abspath "${OUTPUT_FILE}")"
 OUTPUT_PARENT="$(dirname "${OUTPUT_FILE}")"
 mkdir -p "${OUTPUT_PARENT}" || error_exit "Failed to create output directory: ${OUTPUT_PARENT}" 2
 
-# Step 4: Validate numeric parameters
-if ! [[ "${NEIGHBORS}" =~ ^[0-9]+$ ]] || [ "${NEIGHBORS}" -le 0 ]; then
-    error_exit "--neighbors must be a positive integer" 1
-fi
-
-if ! [[ "${K0_FOR_LOCAL_SCALE}" =~ ^[0-9]+$ ]] || [ "${K0_FOR_LOCAL_SCALE}" -le 0 ]; then
-    error_exit "--k0 must be a positive integer" 1
-fi
-
-if [ "${K0_FOR_LOCAL_SCALE}" -ge "${NEIGHBORS}" ]; then
-    error_exit "--k0 must be less than --neighbors" 1
-fi
-
-if ! [[ "${BATCH_SIZE}" =~ ^[0-9]+$ ]] || [ "${BATCH_SIZE}" -le 0 ]; then
-    error_exit "--batch-size must be a positive integer" 1
-fi
-
-if ! [[ "${ROW_GROUP_SIZE}" =~ ^[0-9]+$ ]] || [ "${ROW_GROUP_SIZE}" -le 0 ]; then
-    error_exit "--row-group-size must be a positive integer" 1
-fi
-
-case "${DISTANCE_DTYPE}" in
-    float32|float64) ;;
-    *) error_exit "--distance-dtype must be float32 or float64" 1 ;;
-esac
-
-if ! python3 -c "f=${SAMPLE_FRACTION}; exit(0 if 0.0 <= f <= 1.0 else 1)" 2>/dev/null; then
-    error_exit "--sample-fraction must be between 0 and 1" 1
-fi
+# Step 4: Note that parameter validation will be done by the Python script
+# when it loads config.toml
 
 # Step 5: Setup Python environment
 ORIGINAL_PWD="$(pwd)"
@@ -375,10 +314,21 @@ else
     VENV_PATH=""
 fi
 
-# Step 6: Prepare logs directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/../logs"
-mkdir -p "${LOG_DIR}"
+# Step 6: Extract log_dir from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${CONFIG_FILE}" ]; then
+    error_exit "Config file not found: ${CONFIG_FILE}" 1
+fi
+# Extract log_dir from config.toml (remove quotes and whitespace)
+LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
+if [ -z "${LOG_DIR}" ]; then
+    error_exit "log_dir not found in config.toml" 1
+fi
+# Resolve relative path if needed (relative to PROJECT_ROOT)
+if [[ "${LOG_DIR}" != /* ]]; then
+    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
+fi
+mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 info "Input directory: ${INPUT_DIR}"
 info "Output file: ${OUTPUT_FILE}"
@@ -387,7 +337,8 @@ info "Log directory: ${LOG_DIR}"
 # Step 7: Assemble export variables
 SBATCH_SCRIPT="${SCRIPT_DIR}/difficulty_metadata.sbatch"
 
-EXPORT_VARS="ALL,INPUT_DATASET_PATH=${INPUT_DIR},OUTPUT_FILE=${OUTPUT_FILE},PYTHON_MODULE=${PYTHON_MODULE},PROJECT_ROOT=${PROJECT_ROOT},NEIGHBORS=${NEIGHBORS},K0_FOR_LOCAL_SCALE=${K0_FOR_LOCAL_SCALE},SAMPLE_FRACTION=${SAMPLE_FRACTION},BATCH_SIZE=${BATCH_SIZE},ROW_GROUP_SIZE=${ROW_GROUP_SIZE},DISTANCE_DTYPE=${DISTANCE_DTYPE}"
+# Note: All hyperparameters come from config.toml only
+EXPORT_VARS="ALL,INPUT_DATASET_PATH=${INPUT_DIR},OUTPUT_FILE=${OUTPUT_FILE},PYTHON_MODULE=${PYTHON_MODULE},PROJECT_ROOT=${PROJECT_ROOT}"
 
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
@@ -431,9 +382,7 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "CPUs: ${CPUS}"
     echo "Input directory: ${INPUT_DIR}"
     echo "Output file: ${OUTPUT_FILE}"
-    echo "Neighbors: ${NEIGHBORS}"
-    echo "k0: ${K0_FOR_LOCAL_SCALE}"
-    echo "Sample fraction: ${SAMPLE_FRACTION}"
+    echo "Hyperparameters: from config.toml"
     if [ -n "${DEPENDENCY}" ]; then
         echo "Dependency: afterok:${DEPENDENCY}"
     fi

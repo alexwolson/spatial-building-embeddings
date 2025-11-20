@@ -3,16 +3,20 @@ Unified configuration management for the spatial building embeddings pipeline.
 
 Supports loading configuration from:
 - Environment variables (with prefixes)
-- TOML config files with [global] and workflow-specific sections
+- TOML config files with type-based sections
 - Command-line argument to specify config file path
 
 The unified config file structure:
-- [global] section: Shared settings (seed, data_root, log_dir, etc.)
-- [process_tar] section: Tar preprocessing configuration
-- [merge_and_split] section: Dataset assembly configuration
-- [generate_embeddings] section: Embedding generation configuration
-- [triplet_training] section: Triplet loss training configuration
-- [difficulty_metadata] section: Difficulty metadata computation configuration
+- [global] section: Shared settings (seed, log_dir)
+- [paths] section: All pipeline file and directory paths
+- [embedding_model] section: Model settings for embedding generation
+- [training_model] section: Model architecture settings for training
+- [training] section: Training hyperparameters and settings
+- [data] section: Data processing settings (splits, neighbors, etc.)
+- [infrastructure] section: Device, workers, and performance settings
+- [logging] section: Logging and monitoring settings
+
+Workflows automatically read from the relevant sections based on their needs.
 """
 
 from pathlib import Path
@@ -33,11 +37,9 @@ class GlobalConfig(BaseSettings):
     )
 
     seed: int = Field(42, description="Random seed for reproducibility")
-    data_root: Path = Field(
-        Path("data"), description="Root directory for data (raw, intermediates, merged, etc.)"
-    )
-    log_dir: Path | None = Field(
-        None, description="Optional directory for log files (if None, logs go to workflow-specific locations)"
+    log_dir: Path = Field(
+        ...,
+        description="Base directory for all log files (mandatory)",
     )
 
 
@@ -51,14 +53,16 @@ class ProcessTarConfig(BaseSettings):
     )
 
     tar_file: Path = Field(..., description="Path to tar file to process")
-    output_dir: Path = Field(
-        ..., description="Output directory for intermediate Parquet files"
+    intermediates_dir: Path = Field(
+        ..., description="Output directory for intermediate Parquet files (shared pipeline location)"
     )
     log_file: Path | None = Field(None, description="Optional log file path")
     temp_dir: Path | None = Field(
         None, description="Optional temporary directory for extraction"
     )
-    seed: int | None = Field(None, description="Random seed (inherits from global if not set)")
+    seed: int | None = Field(
+        None, description="Random seed (inherits from global if not set)"
+    )
 
 
 class MergeAndSplitConfig(BaseSettings):
@@ -73,8 +77,8 @@ class MergeAndSplitConfig(BaseSettings):
     intermediates_dir: Path = Field(
         ..., description="Directory containing intermediate Parquet files"
     )
-    output_dir: Path = Field(
-        ..., description="Directory for final output Parquet files"
+    merged_dir: Path = Field(
+        ..., description="Directory for final output Parquet files (shared pipeline location)"
     )
     embeddings_dir: Path = Field(
         ..., description="Directory containing per-tar embedding Parquet files"
@@ -82,7 +86,9 @@ class MergeAndSplitConfig(BaseSettings):
     train_ratio: float = Field(0.7, ge=0.0, le=1.0, description="Training set ratio")
     val_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Validation set ratio")
     test_ratio: float = Field(0.15, ge=0.0, le=1.0, description="Test set ratio")
-    seed: int | None = Field(None, description="Random seed (inherits from global if not set)")
+    seed: int | None = Field(
+        None, description="Random seed (inherits from global if not set)"
+    )
     log_file: Path | None = Field(None, description="Optional log file path")
 
     def model_post_init(self, __context):
@@ -107,8 +113,8 @@ class GenerateEmbeddingsConfig(BaseSettings):
     tar_file: Path | None = Field(
         None, description="Optional: tar file path (auto-detect if None)"
     )
-    output_dir: Path = Field(
-        ..., description="Output directory for embedding parquet files"
+    embeddings_dir: Path = Field(
+        ..., description="Output directory for embedding parquet files (shared pipeline location)"
     )
     model_name: str = Field(
         "vit_base_patch14_dinov2.lvd142m", description="Timm model name"
@@ -196,13 +202,10 @@ class TripletTrainingConfig(BaseSettings):
         ..., description="Path to difficulty_metadata.parquet"
     )
     checkpoint_dir: Path = Field(..., description="Directory for saving checkpoints")
-    output_embeddings_dir: Path | None = Field(
-        None, description="Directory for saving final embeddings (optional)"
-    )
 
     # Model architecture
     input_dim: int = Field(
-        768, description="Input embedding dimension (DINOv2 base = 768)"
+        768, description="Input embedding dimension (nomic-embed-vision-v1.5 = 768)"
     )
     hidden_dim: int = Field(512, description="Base hidden layer dimension")
     num_hidden_layers: PositiveInt = Field(
@@ -244,12 +247,10 @@ class TripletTrainingConfig(BaseSettings):
     )
 
     # Training configuration
-    device: Literal["cuda", "cpu", "auto"] = Field(
-        "auto", description="Device to use (auto detects GPU)"
+    # device, num_workers, and pin_memory are determined dynamically in the code
+    seed: int | None = Field(
+        None, description="Random seed (inherits from global if not set)"
     )
-    num_workers: int = Field(4, ge=0, description="Number of data loader workers")
-    pin_memory: bool = Field(True, description="Pin memory for data loader")
-    seed: int | None = Field(None, description="Random seed (inherits from global if not set)")
 
     # Checkpointing and validation
     save_every_n_epochs: int = Field(
@@ -313,12 +314,6 @@ class TripletTrainingConfig(BaseSettings):
         description="Metric name to use for selecting best run from WandB (for best training)",
     )
 
-    def model_post_init(self, __context):
-        """Validate configuration after initialization."""
-        if self.device == "auto":
-            import torch
-
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 class DifficultyMetadataConfig(BaseSettings):
@@ -330,13 +325,13 @@ class DifficultyMetadataConfig(BaseSettings):
         extra="ignore",
     )
 
-    input_parquet_path: Path = Field(
+    merged_dir: Path = Field(
         ...,
-        description="Directory or dataset path containing train/val/test parquet outputs.",
+        description="Directory containing train/val/test parquet outputs (shared pipeline location).",
     )
-    output_parquet_path: Path = Field(
+    difficulty_metadata_path: Path = Field(
         Path("difficulty_metadata.parquet"),
-        description="Destination parquet file for aggregated difficulty metadata.",
+        description="Destination parquet file for aggregated difficulty metadata (shared pipeline location).",
     )
     neighbors: PositiveInt = Field(
         150,
@@ -363,6 +358,9 @@ class DifficultyMetadataConfig(BaseSettings):
     row_group_size: PositiveInt = Field(
         50_000,
         description="Row group size for the output parquet writer.",
+    )
+    seed: int | None = Field(
+        None, description="Random seed (inherits from global if not set)"
     )
 
     @model_validator(mode="after")
@@ -391,25 +389,28 @@ def load_config_from_file(
     DifficultyMetadataConfig,
 ]:
     """
-    Load configuration from a unified TOML file.
+    Load configuration from a unified TOML file organized by type.
 
-    The config file should have:
-    - A [global] section with shared settings (seed, data_root, log_dir)
-    - A workflow-specific section (e.g., [process_tar], [triplet_training])
-
-    Global values are merged into the workflow config, with workflow-specific
-    values taking precedence.
+    The config file should have type-based sections:
+    - [global]: Shared settings (seed, log_dir)
+    - [paths]: All pipeline file and directory paths
+    - [embedding_model]: Model settings for embedding generation
+    - [training_model]: Model architecture settings for training
+    - [training]: Training hyperparameters and settings
+    - [data]: Data processing settings (splits, neighbors, etc.)
+    - [infrastructure]: Device, workers, and performance settings
+    - [logging]: Logging and monitoring settings
 
     Args:
         config_path: Path to config file (must be .toml)
         config_type: Type of config to load
 
     Returns:
-        Configuration object with global values merged in
+        Configuration object with values from relevant sections merged in
 
     Raises:
         FileNotFoundError: If config file doesn't exist
-        ValueError: If config file format is not supported or section is missing
+        ValueError: If config file format is not supported
     """
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -420,47 +421,57 @@ def load_config_from_file(
     with open(config_path, "rb") as f:
         data = tomllib.load(f)
 
-    # Load global config (optional, defaults used if not present)
+    # Load global config
     global_data = data.get("global", {})
     global_config = GlobalConfig(**global_data)
 
-    # Extract the relevant section from the config file
-    section_name = config_type
-    if section_name not in data:
-        raise ValueError(
-            f"Config file must contain a [{section_name}] section. "
-            f"Found sections: {list(data.keys())}"
-        )
-
-    section_data = data[section_name]
-
-    # Merge global values into section data (section values take precedence)
+    # Build merged data by flattening relevant sections
     merged_data = {}
     
-    # Add seed from global if not specified in section
-    if "seed" not in section_data and global_config.seed is not None:
+    # Add global settings
+    if global_config.seed is not None:
         merged_data["seed"] = global_config.seed
-    
-    # Add log_file from global log_dir if not specified and global log_dir exists
-    if "log_file" not in section_data and global_config.log_dir is not None:
-        # Construct log file path based on workflow type
-        log_filename = f"{config_type}.log"
-        merged_data["log_file"] = global_config.log_dir / log_filename
-    
-    # Merge section data (overrides any global defaults we just set)
-    merged_data.update(section_data)
+    # Always set log_file from mandatory log_dir
+    merged_data["log_file"] = global_config.log_dir / f"{config_type}.log"
 
-    # Instantiate the appropriate config class
+    # Merge sections based on config type
+    # Handle batch_size conflicts by selectively merging fields
     if config_type == "process_tar":
-        return ProcessTarConfig(**merged_data)
+        merged_data.update(data.get("paths", {}))
+        if "tar_file" not in merged_data:
+            merged_data["tar_file"] = "data/raw/placeholder.tar"
     elif config_type == "merge_and_split":
-        return MergeAndSplitConfig(**merged_data)
+        merged_data.update(data.get("paths", {}))
+        merged_data.update(data.get("data", {}))
     elif config_type == "generate_embeddings":
-        return GenerateEmbeddingsConfig(**merged_data)
+        merged_data.update(data.get("paths", {}))
+        merged_data.update(data.get("embedding_model", {}))
+        if "parquet_file" not in merged_data:
+            merged_data["parquet_file"] = "data/intermediates/placeholder.parquet"
     elif config_type == "triplet_training":
-        return TripletTrainingConfig(**merged_data)
+        merged_data.update(data.get("paths", {}))
+        merged_data.update(data.get("training_model", {}))
+        merged_data.update(data.get("training", {}))
+        # Infrastructure: no fields to merge (device, num_workers, pin_memory are determined dynamically)
+        merged_data.update(data.get("logging", {}))
     elif config_type == "difficulty_metadata":
-        return DifficultyMetadataConfig(**merged_data)
+        merged_data.update(data.get("paths", {}))
+        merged_data.update(data.get("data", {}))
+        # Infrastructure: merge all fields (including batch_size for difficulty_metadata)
+        merged_data.update(data.get("infrastructure", {}))
     else:
         raise ValueError(f"Unknown config type: {config_type}")
 
+    # Convert retrieval_metric_top_k to tuple if present
+    if "retrieval_metric_top_k" in merged_data:
+        merged_data["retrieval_metric_top_k"] = tuple(merged_data["retrieval_metric_top_k"])
+
+    # Instantiate the appropriate config class
+    config_classes = {
+        "process_tar": ProcessTarConfig,
+        "merge_and_split": MergeAndSplitConfig,
+        "generate_embeddings": GenerateEmbeddingsConfig,
+        "triplet_training": TripletTrainingConfig,
+        "difficulty_metadata": DifficultyMetadataConfig,
+    }
+    return config_classes[config_type](**merged_data)

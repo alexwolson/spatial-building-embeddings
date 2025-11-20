@@ -15,9 +15,8 @@
 #   --time <TIME>              Time limit per job (default: 4:00:00)
 #   --max-concurrent <N>       Maximum concurrent jobs (default: unlimited, let SLURM decide)
 #   --mem-per-cpu <MEM>        Memory per CPU (default: 8G)
-#   --model-name <NAME>        Timm model name (default: vit_base_patch14_dinov2.lvd142m)
-#   --batch-size <N>           Batch size for inference (default: 128)
 #   --resume                    Skip already-processed parquet files
+#   Note: model_name and batch_size come from config.toml only
 #   --venv-path <PATH>         Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
 #   --python-module <MODULE>   Python module to load (default: python/3.12)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
@@ -56,8 +55,6 @@ ACCOUNT="${SLURM_ACCOUNT:-}"
 TIME="24:00:00"
 MAX_CONCURRENT=""  # Empty = unlimited (let SLURM scheduler decide based on resources)
 MEM_PER_CPU="48G"
-MODEL_NAME="vit_base_patch14_dinov2.lvd142m"
-BATCH_SIZE="128"
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
@@ -129,14 +126,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --mem-per-cpu)
             MEM_PER_CPU="$2"
-            shift 2
-            ;;
-        --model-name)
-            MODEL_NAME="$2"
-            shift 2
-            ;;
-        --batch-size)
-            BATCH_SIZE="$2"
             shift 2
             ;;
         --resume)
@@ -293,7 +282,20 @@ info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
-LOG_DIR="${PROJECT_ROOT}/generate_embeddings/logs"
+# Extract log_dir from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${CONFIG_FILE}" ]; then
+    error_exit "Config file not found: ${CONFIG_FILE}" 1
+fi
+# Extract log_dir from config.toml (remove quotes and whitespace)
+LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
+if [ -z "${LOG_DIR}" ]; then
+    error_exit "log_dir not found in config.toml" 1
+fi
+# Resolve relative path if needed (relative to PROJECT_ROOT)
+if [[ "${LOG_DIR}" != /* ]]; then
+    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
+fi
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 # Verify directories were created
@@ -378,7 +380,8 @@ info "Submitting job array for ${NUM_PARQUETS} parquet file(s)"
 SBATCH_SCRIPT="${SCRIPT_DIR}/generate_embeddings_array.sbatch"
 
 # Build export string - include PROJECT_ROOT and other variables
-EXPORT_VARS="ALL,PARQUET_LIST_FILE=${PARQUET_LIST_FILE},RAW_DIR=${RAW_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},PROJECT_ROOT=${PROJECT_ROOT},MODEL_NAME=${MODEL_NAME},BATCH_SIZE=${BATCH_SIZE}"
+# Note: MODEL_NAME and BATCH_SIZE come from config.toml only
+EXPORT_VARS="ALL,PARQUET_LIST_FILE=${PARQUET_LIST_FILE},RAW_DIR=${RAW_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},LOG_DIR=${LOG_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
 fi
@@ -418,8 +421,7 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "Number of tasks: ${NUM_PARQUETS}"
     echo "Max concurrent: ${MAX_CONCURRENT:-unlimited}"
     echo "Time limit: ${TIME}"
-    echo "Model: ${MODEL_NAME}"
-    echo "Batch size: ${BATCH_SIZE}"
+    echo "Model and batch size: from config.toml"
     echo "Intermediates directory: ${INTERMEDIATES_DIR}"
     echo "Raw directory: ${RAW_DIR}"
     echo "Output directory: ${OUTPUT_DIR}"

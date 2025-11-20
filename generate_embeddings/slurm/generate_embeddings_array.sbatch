@@ -20,8 +20,7 @@
 #   VENV_PATH: Path to Python virtual environment (optional, if using venv)
 #   PYTHON_MODULE: Python module to load (e.g., python/3.12)
 #   ARROW_MODULE: Arrow module to load for PyArrow (optional, e.g., arrow/17.0.0)
-#   MODEL_NAME: Timm model name (default: vit_base_patch14_dinov2.lvd142m)
-#   BATCH_SIZE: Batch size for inference (default: 128)
+#   Note: MODEL_NAME and BATCH_SIZE come from config.toml only
 
 set -euo pipefail
 
@@ -96,21 +95,7 @@ fi
 
 echo "Processing parquet file: ${PARQUET_FILE}"
 
-# Step 8: Check if output already exists (resume capability)
-# Normalize OUTPUT_DIR to remove trailing slashes
-OUTPUT_DIR="${OUTPUT_DIR%/}"
-PARQUET_BASENAME=$(basename "${PARQUET_FILE}" .parquet)
-OUTPUT_FILE="${OUTPUT_DIR}/${PARQUET_BASENAME}_embeddings.parquet"
-
-if [ -f "${OUTPUT_FILE}" ]; then
-    echo "Skipping ${PARQUET_FILE} - output already exists: ${OUTPUT_FILE}"
-    exit 0
-fi
-
-# Step 9: Create config file and run processing script
-echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
-
-# Determine project root - prefer explicit env, otherwise fall back to script location
+# Step 8: Determine project root - prefer explicit env, otherwise fall back to script location
 if [ -n "${PROJECT_ROOT:-}" ]; then
     PROJECT_ROOT="$(cd "${PROJECT_ROOT}" && pwd)"
 else
@@ -128,22 +113,38 @@ fi
 # Add project root to PYTHONPATH so imports work
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
+# Locate base config file
+BASE_CONFIG="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${BASE_CONFIG}" ]; then
+    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
+    exit 1
+fi
+
 # Use SLURM_TMPDIR (node-local storage) for extraction if available
 # This reduces memory pressure and improves I/O performance for large tar files
 EXTRACT_DIR="${SLURM_TMPDIR:-${TMPDIR:-/tmp}}/extract_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}"
 mkdir -p "${EXTRACT_DIR}"
 
-# Create temporary config file in temp directory
-CONFIG_DIR="${TMPDIR:-/tmp}"
-CONFIG_FILE="${CONFIG_DIR}/generate_embeddings_${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}.toml"
+# Step 9: Check if output already exists (resume capability)
+# Extract embeddings_dir from config.toml for checking existing files
+EMBEDDINGS_DIR=$(awk -F'=' '/^embeddings_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${BASE_CONFIG}" | head -1)
+if [ -z "${EMBEDDINGS_DIR}" ]; then
+    # Fallback to default if not found
+    EMBEDDINGS_DIR="data/embeddings"
+fi
+PARQUET_BASENAME=$(basename "${PARQUET_FILE}" .parquet)
+OUTPUT_FILE="${EMBEDDINGS_DIR}/${PARQUET_BASENAME}_embeddings.parquet"
 
-# Set defaults for model name and batch size
-MODEL_NAME="${MODEL_NAME:-vit_base_patch14_dinov2.lvd142m}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+if [ -f "${OUTPUT_FILE}" ]; then
+    echo "Skipping ${PARQUET_FILE} - output already exists: ${OUTPUT_FILE}"
+    exit 0
+fi
+
+# Step 10: Run processing script with base config and CLI args
+echo "Starting processing at $(date '+%Y-%m-%d %H:%M:%S')"
 
 # Ensure cleanup on exit
 cleanup() {
-    rm -f "${CONFIG_FILE}"
     # Clean up extraction directory if it exists
     if [ -d "${EXTRACT_DIR}" ]; then
         rm -rf "${EXTRACT_DIR}"
@@ -151,18 +152,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cat > "${CONFIG_FILE}" << EOF
-[generate_embeddings]
-parquet_file = "${PARQUET_FILE}"
-# tar_file omitted - will auto-detect from parquet filename
-output_dir = "${OUTPUT_DIR}"
-model_name = "${MODEL_NAME}"
-batch_size = ${BATCH_SIZE}
-temp_dir = "${EXTRACT_DIR}"
-EOF
-
 srun python -m generate_embeddings.generate_embeddings \
-    --config "${CONFIG_FILE}"
+    --config "${BASE_CONFIG}" \
+    --parquet-file "${PARQUET_FILE}" \
+    --temp-dir "${EXTRACT_DIR}"
 
 EXIT_CODE=$?
 

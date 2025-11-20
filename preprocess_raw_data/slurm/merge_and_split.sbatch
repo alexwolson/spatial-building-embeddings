@@ -126,45 +126,20 @@ fi
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 echo "Project root: ${PROJECT_ROOT}"
 
-# Step 8: Set default values for optional parameters
-TRAIN_RATIO="${TRAIN_RATIO:-0.7}"
-VAL_RATIO="${VAL_RATIO:-0.15}"
-TEST_RATIO="${TEST_RATIO:-0.15}"
-SEED="${SEED:-42}"
+# Step 8: Locate base config file
+BASE_CONFIG="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${BASE_CONFIG}" ]; then
+    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
+    exit 1
+fi
 
-echo "Split ratios: train=${TRAIN_RATIO}, val=${VAL_RATIO}, test=${TEST_RATIO}"
-echo "Random seed: ${SEED}"
+echo "Using base config file: ${BASE_CONFIG}"
 
-# Step 9: Create config file and run merge and split script
+# Step 9: Run merge and split script with base config
 echo "Starting merge and split at $(date '+%Y-%m-%d %H:%M:%S')"
 
-# Create log file path
-LOG_FILE="${SLURM_SUBMIT_DIR:-.}/merge_${SLURM_JOB_ID}.log"
-
-# Create config file in temp directory
-CONFIG_DIR="${TMPDIR:-/tmp}"
-CONFIG_FILE="${CONFIG_DIR}/merge_and_split_${SLURM_JOB_ID}.toml"
-
-# Ensure cleanup on exit
-cleanup() {
-    rm -f "${CONFIG_FILE}"
-}
-trap cleanup EXIT
-
-cat > "${CONFIG_FILE}" << EOF
-[merge_and_split]
-intermediates_dir = "${INTERMEDIATES_DIR}"
-output_dir = "${OUTPUT_DIR}"
-embeddings_dir = "${EMBEDDINGS_DIR}"
-train_ratio = ${TRAIN_RATIO}
-val_ratio = ${VAL_RATIO}
-test_ratio = ${TEST_RATIO}
-seed = ${SEED}
-log_file = "${LOG_FILE}"
-EOF
-
 python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
-    --config "${CONFIG_FILE}"
+    --config "${BASE_CONFIG}"
 
 EXIT_CODE=$?
 
@@ -176,8 +151,6 @@ if [ ${EXIT_CODE} -ne 0 ]; then
 fi
 
 echo "Merge and split completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
-echo "Output files written to: ${OUTPUT_DIR}"
-echo "Log file: ${LOG_FILE}"
 
 exit 0
 

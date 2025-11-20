@@ -15,12 +15,8 @@
 #   PYTHON_MODULE       Python module to load (e.g., python/3.12)
 #   ARROW_MODULE        Optional Arrow module (e.g., arrow/17.0.0)
 #   VENV_PATH           Optional virtual environment path
-#   NEIGHBORS           Number of neighbours (default 150)
-#   K0_FOR_LOCAL_SCALE  Local scale rank (default 50)
-#   SAMPLE_FRACTION     Sample fraction for calibration (default 0.03)
-#   BATCH_SIZE          BallTree query batch size (default 100000)
-#   ROW_GROUP_SIZE      Output parquet row group size (default 50000)
-#   DISTANCE_DTYPE      Neighbor distance dtype (float32/float64)
+#   Note: All hyperparameters (neighbors, k0_for_local_scale, sample_fraction_for_bands,
+#         batch_size, row_group_size, distance_dtype) come from config.toml only
 #   LOG_DIR             Directory for log files (optional)
 
 set -euo pipefail
@@ -99,45 +95,19 @@ echo "Project root: ${PROJECT_ROOT}"
 echo "Input dataset path: ${INPUT_DATASET_PATH}"
 echo "Output file: ${OUTPUT_FILE}"
 
-NEIGHBORS="${NEIGHBORS:-150}"
-K0_FOR_LOCAL_SCALE="${K0_FOR_LOCAL_SCALE:-50}"
-SAMPLE_FRACTION="${SAMPLE_FRACTION:-0.03}"
-BATCH_SIZE="${BATCH_SIZE:-100000}"
-ROW_GROUP_SIZE="${ROW_GROUP_SIZE:-50000}"
-DISTANCE_DTYPE="${DISTANCE_DTYPE:-float32}"
+# Locate base config file
+BASE_CONFIG="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${BASE_CONFIG}" ]; then
+    echo "Error: Base config file not found: ${BASE_CONFIG}" >&2
+    exit 1
+fi
 
-case "${DISTANCE_DTYPE}" in
-    float32|float64) ;;
-    *)
-        echo "Error: DISTANCE_DTYPE must be float32 or float64" >&2
-        exit 1
-        ;;
-esac
-
-CONFIG_DIR="${TMPDIR:-/tmp}"
-CONFIG_FILE="${CONFIG_DIR}/difficulty_metadata_${SLURM_JOB_ID}.toml"
-
-cleanup() {
-    rm -f "${CONFIG_FILE}"
-}
-trap cleanup EXIT
-
-cat > "${CONFIG_FILE}" << EOF
-[difficulty_metadata]
-input_parquet_path = "${INPUT_DATASET_PATH}"
-output_parquet_path = "${OUTPUT_FILE}"
-neighbors = ${NEIGHBORS}
-k0_for_local_scale = ${K0_FOR_LOCAL_SCALE}
-sample_fraction_for_bands = ${SAMPLE_FRACTION}
-batch_size = ${BATCH_SIZE}
-row_group_size = ${ROW_GROUP_SIZE}
-distance_dtype = "${DISTANCE_DTYPE}"
-EOF
+echo "Using base config file: ${BASE_CONFIG}"
 
 LOG_FILE="${LOG_DIR:-.}/difficulty_metadata_${SLURM_JOB_ID}.log"
 
 echo "Running difficulty metadata computation at $(date '+%Y-%m-%d %H:%M:%S')"
-python "${PROJECT_ROOT}/difficulty_metadata/compute_neighbors.py" --config "${CONFIG_FILE}" | tee "${LOG_FILE}"
+python "${PROJECT_ROOT}/difficulty_metadata/compute_neighbors.py" --config "${BASE_CONFIG}" | tee "${LOG_FILE}"
 EXIT_CODE=${PIPESTATUS[0]}
 
 if [ ${EXIT_CODE} -ne 0 ]; then
@@ -147,7 +117,6 @@ if [ ${EXIT_CODE} -ne 0 ]; then
 fi
 
 echo "Difficulty metadata computation completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
-echo "Output written to: ${OUTPUT_FILE}"
 echo "Log file: ${LOG_FILE}"
 
 exit 0

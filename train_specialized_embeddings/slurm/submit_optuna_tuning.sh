@@ -17,7 +17,6 @@
 #   --max-epochs <N>            Override training epochs per trial
 #   --disable-wandb             Disable Weights & Biases logging during tuning
 #   --wandb-mode <MODE>         Override wandb mode ("online" or "offline")
-#   --save-embeddings           Persist projected embeddings for each trial (disabled by default)
 #   --sqlite-timeout <SECONDS>  SQLite connection timeout (default: 60)
 #   --time <HH:MM:SS>           Wall clock limit per worker (default: 24:00:00)
 #   --mem <MEM>                 Memory per worker (default: 64G)
@@ -77,7 +76,6 @@ TRIALS_PER_WORKER=1
 MAX_EPOCHS=""
 DISABLE_WANDB=false
 WANDB_MODE_OVERRIDE=""
-SAVE_EMBEDDINGS=false
 SQLITE_TIMEOUT="60"
 TIME_LIMIT="01:00:00"
 MEM="256G"
@@ -146,10 +144,6 @@ while [[ $# -gt 0 ]]; do
         --wandb-mode)
             WANDB_MODE_OVERRIDE="$2"
             shift 2
-            ;;
-        --save-embeddings)
-            SAVE_EMBEDDINGS=true
-            shift
             ;;
         --sqlite-timeout)
             SQLITE_TIMEOUT="$2"
@@ -348,9 +342,6 @@ if [ -n "${WANDB_MODE_OVERRIDE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},WANDB_MODE_OVERRIDE=${WANDB_MODE_OVERRIDE}"
 fi
 
-if [ "${SAVE_EMBEDDINGS}" = true ]; then
-    EXPORT_VARS="${EXPORT_VARS},SAVE_EMBEDDINGS=true"
-fi
 
 SUBMIT_OUTPUT=$(sbatch \
     --account="${ACCOUNT}" \

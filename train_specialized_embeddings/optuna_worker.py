@@ -40,9 +40,7 @@ LOGGER_NAME = "optuna_worker"
 
 def parse_args() -> argparse.Namespace:
     default_base_config = Path(__file__).resolve().parent / "config.toml"
-    default_output_root = (
-        Path(__file__).resolve().parent / "optuna_trials"
-    )
+    default_output_root = Path(__file__).resolve().parent / "optuna_trials"
 
     parser = argparse.ArgumentParser(
         description="Run Optuna-powered hyperparameter tuning trial(s)."
@@ -92,11 +90,6 @@ def parse_args() -> argparse.Namespace:
         choices=("online", "offline"),
         default=None,
         help="Override wandb mode if logging remains enabled.",
-    )
-    parser.add_argument(
-        "--save-embeddings",
-        action="store_true",
-        help="Persist projected embeddings for each trial. Off by default to save time/space.",
     )
     parser.add_argument(
         "--sqlite-timeout",
@@ -152,38 +145,26 @@ def sample_hyperparameters(
     """Return a dictionary of config overrides sampled for this trial."""
     params: dict[str, Any] = {}
 
-    params["learning_rate"] = trial.suggest_float(
-        "learning_rate", 5e-5, 5e-4, log=True
-    )
-    params["weight_decay"] = trial.suggest_float(
-        "weight_decay", 1e-6, 1e-3, log=True
-    )
+    params["learning_rate"] = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
+    params["weight_decay"] = trial.suggest_float("weight_decay", 1e-6, 1e-3, log=True)
     params["margin"] = trial.suggest_float("margin", 0.2, 1.0)
     params["dropout"] = trial.suggest_float("dropout", 0.0, 0.4)
-    params["use_residual"] = trial.suggest_categorical(
-        "use_residual", [True, False]
-    )
+    params["use_residual"] = trial.suggest_categorical("use_residual", [True, False])
     params["use_layer_norm"] = trial.suggest_categorical(
         "use_layer_norm", [True, False]
     )
     params["loss_distance"] = trial.suggest_categorical(
         "loss_distance", ["euclidean", "cosine"]
     )
-    params["hidden_dim"] = trial.suggest_categorical(
-        "hidden_dim", [256, 384, 512, 768]
-    )
-    params["num_hidden_layers"] = trial.suggest_int(
-        "num_hidden_layers", 1, 3
-    )
+    params["hidden_dim"] = trial.suggest_categorical("hidden_dim", [256, 384, 512, 768])
+    params["num_hidden_layers"] = trial.suggest_int("num_hidden_layers", 1, 3)
     params["hidden_dim_multiplier"] = trial.suggest_categorical(
         "hidden_dim_multiplier", [0.75, 1.0, 1.25]
     )
     params["activation"] = trial.suggest_categorical(
         "activation", ["gelu", "silu", "relu"]
     )
-    params["batch_size"] = trial.suggest_categorical(
-        "batch_size", [128, 192, 256, 320]
-    )
+    params["batch_size"] = trial.suggest_categorical("batch_size", [128, 192, 256, 320])
     params["ucb_exploration_constant"] = trial.suggest_float(
         "ucb_exploration_constant", 0.5, 3.5
     )
@@ -263,7 +244,6 @@ def run_trial(
     trial_dir = allocate_trial_directory(args.trial_output_root, trial.number)
     checkpoints_dir = trial_dir / "checkpoints"
     logs_dir = trial_dir / "logs"
-    embeddings_dir = trial_dir / "embeddings"
 
     logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -279,7 +259,6 @@ def run_trial(
         **params,
         "checkpoint_dir": str(checkpoints_dir),
         "log_file": str(logs_dir / "train.log"),
-        "output_embeddings_dir": str(embeddings_dir) if args.save_embeddings else None,
         "resume_from_checkpoint": None,
         "wandb_enabled": wandb_enabled,
     }
@@ -298,9 +277,7 @@ def run_trial(
 
     if wandb_enabled:
         base_run_name = (
-            base_config.wandb_run_name
-            or base_config.wandb_project
-            or args.study_name
+            base_config.wandb_run_name or base_config.wandb_project or args.study_name
         )
         updates["wandb_run_name"] = f"{base_run_name}-trial-{trial.number:05d}"
 

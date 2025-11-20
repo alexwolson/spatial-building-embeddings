@@ -534,7 +534,7 @@ def main() -> int:
         stats = merge_and_split(
             intermediates_dir=config.intermediates_dir,
             embeddings_dir=config.embeddings_dir,
-            output_dir=config.output_dir,
+            output_dir=config.merged_dir,
             train_ratio=config.train_ratio,
             val_ratio=config.val_ratio,
             test_ratio=config.test_ratio,

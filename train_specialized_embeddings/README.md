@@ -141,11 +141,6 @@ See the root `config.example.toml` for a complete example configuration file. Th
   - Epoch number
   - Training/validation metrics, including `best_val_loss`, `best_val_epoch`, total epochs completed, and whether early stopping fired
 
-### Specialized Embeddings (Optional)
-- If `output_embeddings_dir` is specified, final projected embeddings are saved
-- Saved as `{output_embeddings_dir}/train/specialized_embeddings.parquet` and `{output_embeddings_dir}/val/specialized_embeddings.parquet`
-- Contains all original columns plus an additional `specialized_embedding` column (the original `embedding` column is retained)
-
 ## Requirements
 
 - Python 3.11+

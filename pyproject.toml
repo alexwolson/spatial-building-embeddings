@@ -8,22 +8,19 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.11"
 dependencies = [
-    "huggingface-hub>=0.36.0,<1.0.0",
-    "pandas>=2.0.0",
-    "pillow>=10.0.0",
-    # Note: pyarrow is deliberately NOT included here because it is provided by the Arrow module
-    # on Alliance clusters. The SLURM scripts load the Arrow module (arrow/17.0.0) before
-    # creating/activating the virtual environment, which makes PyArrow available.
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
-    "rich>=13.0.0",
-    "torch>=2.9.0",
-    "torchvision>=0.24.0",
-    "scikit-learn>=1.5.0",
-    "optuna>=3.6.0",
     "black>=25.11.0",
-    "wandb>=0.23.0",
+    "huggingface-hub>=0.36.0",
+    "optuna>=4.6.0",
+    "pandas>=2.3.3",
+    "pillow>=12.0.0",
+    "pydantic>=2.12.4",
+    "pydantic-settings>=2.12.0",
+    "rich>=14.2.0",
+    "scikit-learn>=1.7.2",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
     "transformers>=4.57.1",
+    "wandb>=0.23.0",
 ]
 
 [tool.setuptools]

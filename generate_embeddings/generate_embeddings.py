@@ -99,13 +99,17 @@ def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
 
     # Load Processor
     try:
-        processor = AutoImageProcessor.from_pretrained(model_name, trust_remote_code=True)
+        processor = AutoImageProcessor.from_pretrained(
+            model_name, trust_remote_code=True
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to load processor for {model_name}: {e}")
 
     # Load Model
     try:
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True, safe_serialization=True)
+        model = AutoModel.from_pretrained(
+            model_name, trust_remote_code=True, safe_serialization=True
+        )
     except Exception as e:
         raise RuntimeError(f"Failed to load model {model_name}: {e}")
 
@@ -127,9 +131,7 @@ def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
 class ImageDataset(torch.utils.data.Dataset):
     """Dataset for loading images from paths."""
 
-    def __init__(
-        self, image_paths: list[Path], transform: Callable, extract_dir: Path
-    ):
+    def __init__(self, image_paths: list[Path], transform: Callable, extract_dir: Path):
         self.image_paths = image_paths
         self.transform = transform
         self.extract_dir = extract_dir
@@ -289,16 +291,16 @@ def generate_embeddings_batch(
                 # Forward pass
                 # HF models take 'pixel_values' and return a custom output object
                 outputs = model(pixel_values=batch_images)
-                
+
                 # For DINOv2/ViT, we typically use the CLS token (first token of last hidden state)
                 # Some models have a 'pooler_output', but for raw embeddings, CLS is standard.
                 if hasattr(outputs, "last_hidden_state"):
-                     embeddings = outputs.last_hidden_state[:, 0]
+                    embeddings = outputs.last_hidden_state[:, 0]
                 elif hasattr(outputs, "pooler_output"):
-                     embeddings = outputs.pooler_output
+                    embeddings = outputs.pooler_output
                 else:
-                     # Fallback for some configurations, though unlikely for DINOv2
-                     embeddings = outputs[0]
+                    # Fallback for some configurations, though unlikely for DINOv2
+                    embeddings = outputs[0]
 
                 # Move to CPU and convert to numpy
                 embeddings_np = embeddings.cpu().numpy().astype(np.float32)
@@ -538,6 +540,7 @@ def process_intermediate_file(
     finally:
         if should_cleanup and temp_extract_dir.exists():
             import shutil
+
             shutil.rmtree(temp_extract_dir)
             logger.info(f"Cleaned up temporary directory: {temp_extract_dir}")
 
@@ -552,6 +555,17 @@ def main() -> int:
         type=Path,
         help="Path to TOML config file. If not provided, config is loaded from environment variables.",
     )
+    # Per-job arguments (override config if provided)
+    parser.add_argument(
+        "--parquet-file",
+        type=Path,
+        help="Path to intermediate parquet file to process (overrides config)",
+    )
+    parser.add_argument(
+        "--temp-dir",
+        type=Path,
+        help="Temporary directory for extraction (overrides config)",
+    )
 
     args = parser.parse_args()
     logger = setup_logging(None)
@@ -564,6 +578,12 @@ def main() -> int:
     except Exception as e:
         logger.error(f"Error loading configuration: {e}")
         return 1
+
+    # Override with command-line arguments if provided
+    if args.parquet_file is not None:
+        config.parquet_file = args.parquet_file
+    if args.temp_dir is not None:
+        config.temp_dir = args.temp_dir
 
     if config.log_file:
         logger = setup_logging(config.log_file)
@@ -583,7 +603,7 @@ def main() -> int:
         stats = process_intermediate_file(
             parquet_path=config.parquet_file,
             tar_path=config.tar_file,
-            output_dir=config.output_dir,
+            output_dir=config.embeddings_dir,
             model_name=config.model_name,
             batch_size=config.batch_size,
             temp_dir=config.temp_dir,

@@ -16,10 +16,7 @@
 #   --mem <MEM>                Memory requirement (default: 100G)
 #   --cpus <N>                 Number of CPUs (default: 8)
 #   --dependency <JOB_ID>      Job ID(s) to wait for (optional, for tar preprocessing completion)
-#   --seed <N>                 Random seed for splits (default: 42)
-#   --train-ratio <RATIO>      Training set ratio (default: 0.7)
-#   --val-ratio <RATIO>        Validation set ratio (default: 0.15)
-#   --test-ratio <RATIO>       Test set ratio (default: 0.15)
+#   Note: train_ratio, val_ratio, test_ratio, and seed come from config.toml only
 #   --venv-path <PATH>         Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
 #   --python-module <MODULE>   Python module to load (default: python/3.12)
 #   --arrow-module <MODULE>    Arrow module to load (default: arrow/17.0.0)
@@ -35,9 +32,7 @@
 #   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final \
 #       --account <ACCOUNT> --dependency 12345
 #
-#   # Custom split ratios
-#   ./submit_merge.sh --intermediates-dir /scratch/user/intermediates --output-dir /scratch/user/final \
-#       --account <ACCOUNT> --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1
+#   # Note: Split ratios and seed are configured in config.toml
 #
 # Exit codes:
 #   0: Success
@@ -59,10 +54,6 @@ TIME="00:30:00"
 MEM="100G"
 CPUS=32
 DEPENDENCY=""
-SEED=42
-TRAIN_RATIO=0.7
-VAL_RATIO=0.15
-TEST_RATIO=0.15
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PYTHON_MODULE="python/3.12"
 ARROW_MODULE="arrow/17.0.0"
@@ -132,22 +123,6 @@ while [[ $# -gt 0 ]]; do
             DEPENDENCY="$2"
             shift 2
             ;;
-        --seed)
-            SEED="$2"
-            shift 2
-            ;;
-        --train-ratio)
-            TRAIN_RATIO="$2"
-            shift 2
-            ;;
-        --val-ratio)
-            VAL_RATIO="$2"
-            shift 2
-            ;;
-        --test-ratio)
-            TEST_RATIO="$2"
-            shift 2
-            ;;
         --venv-path)
             VENV_PATH="$2"
             shift 2
@@ -194,11 +169,7 @@ if [ -z "${ACCOUNT}" ]; then
     error_exit "--account is required (or set SLURM_ACCOUNT environment variable)" 1
 fi
 
-# Validate ratios sum to 1.0 (using Python for floating point comparison)
-if ! python3 -c "import sys; r1, r2, r3 = ${TRAIN_RATIO}, ${VAL_RATIO}, ${TEST_RATIO}; sys.exit(0 if abs(r1 + r2 + r3 - 1.0) < 0.0001 else 1)" 2>/dev/null; then
-    RATIO_SUM=$(python3 -c "print(${TRAIN_RATIO} + ${VAL_RATIO} + ${TEST_RATIO})")
-    error_exit "Ratios must sum to 1.0, got ${RATIO_SUM}" 1
-fi
+# Note: Ratio validation will be done by the Python script when it loads config.toml
 
 # Step 1: Auto-detect project root if not provided
 if [ -z "${PROJECT_ROOT}" ]; then
@@ -311,10 +282,21 @@ else
     VENV_PATH=""  # Clear VENV_PATH for system Python
 fi
 
-# Step 4: Create log directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/../logs"
-mkdir -p "${LOG_DIR}"
+# Step 4: Extract log_dir from config.toml
+CONFIG_FILE="${PROJECT_ROOT}/config.toml"
+if [ ! -f "${CONFIG_FILE}" ]; then
+    error_exit "Config file not found: ${CONFIG_FILE}" 1
+fi
+# Extract log_dir from config.toml (remove quotes and whitespace)
+LOG_DIR=$(awk -F'=' '/^log_dir/ {gsub(/^[[:space:]]*["'\'']|["'\'']$/, "", $2); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2); print $2}' "${CONFIG_FILE}" | head -1)
+if [ -z "${LOG_DIR}" ]; then
+    error_exit "log_dir not found in config.toml" 1
+fi
+# Resolve relative path if needed (relative to PROJECT_ROOT)
+if [[ "${LOG_DIR}" != /* ]]; then
+    LOG_DIR="${PROJECT_ROOT}/${LOG_DIR}"
+fi
+mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 info "Output directory: ${OUTPUT_DIR}"
 info "Log directory: ${LOG_DIR}"
@@ -324,7 +306,8 @@ info "Embeddings directory: ${EMBEDDINGS_DIR}"
 SBATCH_SCRIPT="${SCRIPT_DIR}/merge_and_split.sbatch"
 
 # Build export string - only include VENV_PATH and ARROW_MODULE if they're set
-EXPORT_VARS="ALL,INTERMEDIATES_DIR=${INTERMEDIATES_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE},TRAIN_RATIO=${TRAIN_RATIO},VAL_RATIO=${VAL_RATIO},TEST_RATIO=${TEST_RATIO},SEED=${SEED}"
+# Note: train_ratio, val_ratio, test_ratio, and seed come from config.toml only
+EXPORT_VARS="ALL,INTERMEDIATES_DIR=${INTERMEDIATES_DIR},OUTPUT_DIR=${OUTPUT_DIR},PYTHON_MODULE=${PYTHON_MODULE}"
 EXPORT_VARS="${EXPORT_VARS},EMBEDDINGS_DIR=${EMBEDDINGS_DIR},PROJECT_ROOT=${PROJECT_ROOT}"
 if [ -n "${VENV_PATH:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},VENV_PATH=${VENV_PATH}"
@@ -374,8 +357,7 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "Intermediates directory: ${INTERMEDIATES_DIR}"
     echo "Output directory: ${OUTPUT_DIR}"
     echo "Parquet files found: ${PARQUET_COUNT}"
-    echo "Split ratios: train=${TRAIN_RATIO}, val=${VAL_RATIO}, test=${TEST_RATIO}"
-    echo "Random seed: ${SEED}"
+    echo "Split ratios and seed: from config.toml"
     if [ -n "${DEPENDENCY}" ]; then
         echo "Dependency: afterok:${DEPENDENCY}"
     fi

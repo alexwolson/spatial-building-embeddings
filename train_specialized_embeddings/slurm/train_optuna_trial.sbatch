@@ -14,7 +14,7 @@
 #   TRIALS_PER_WORKER, PROJECT_ROOT
 # Optional:
 #   VENV_PATH, PYTHON_MODULE, ARROW_MODULE, MAX_EPOCHS, DISABLE_WANDB
-#   WANDB_MODE_OVERRIDE, SAVE_EMBEDDINGS, SQLITE_TIMEOUT,
+#   WANDB_MODE_OVERRIDE, SQLITE_TIMEOUT,
 #   OPTUNA_WORKER_VERBOSITY, LOG_DIR
 
 set -euo pipefail
@@ -108,9 +108,6 @@ if [ -n "${WANDB_MODE_OVERRIDE:-}" ]; then
     CMD+=(--wandb-mode "${WANDB_MODE_OVERRIDE}")
 fi
 
-if [ "${SAVE_EMBEDDINGS:-}" = "true" ]; then
-    CMD+=(--save-embeddings)
-fi
 
 if [ -n "${SQLITE_TIMEOUT:-}" ]; then
     CMD+=(--sqlite-timeout "${SQLITE_TIMEOUT}")

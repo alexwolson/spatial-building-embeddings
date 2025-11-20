@@ -28,7 +28,9 @@ from train_specialized_embeddings.train import train as run_training
 LOGGER_NAME = "fetch_best_and_train"
 
 
-def setup_logging(log_file: Path | None = None, level: int = logging.INFO) -> logging.Logger:
+def setup_logging(
+    log_file: Path | None = None, level: int = logging.INFO
+) -> logging.Logger:
     """Set up logging with Rich handler and optional file output."""
     handlers: list[logging.Handler] = []
 
@@ -100,7 +102,9 @@ def find_best_run(
                 filters={"display_name": {"$regex": trial_name_pattern}},
             )
         )
-        logger.info("Found %d runs matching pattern '%s'", len(runs), trial_name_pattern)
+        logger.info(
+            "Found %d runs matching pattern '%s'", len(runs), trial_name_pattern
+        )
     except Exception as exc:
         raise RuntimeError(f"Failed to query WandB project '{project}': {exc}") from exc
 
@@ -141,7 +145,9 @@ def find_best_run(
 
 
 def extract_hyperparameters(
-    run: wandb.apis.public.Run, base_config: TripletTrainingConfig, logger: logging.Logger
+    run: wandb.apis.public.Run,
+    base_config: TripletTrainingConfig,
+    logger: logging.Logger,
 ) -> dict[str, Any]:
     """
     Extract hyperparameters from WandB run config.
@@ -189,18 +195,18 @@ def extract_hyperparameters(
             hyperparams[key] = value
             logger.debug("Extracted %s = %s", key, value)
         else:
-            logger.warning("Hyperparameter '%s' not found in run config, using base config", key)
+            logger.warning(
+                "Hyperparameter '%s' not found in run config, using base config", key
+            )
 
     logger.info("Extracted %d hyperparameters", len(hyperparams))
     return hyperparams
 
 
-
-
 def main() -> int:
     """Main entry point."""
     args = parse_args()
-    
+
     # Set up logger early (before config loading to catch config errors)
     logger = setup_logging(None, logging.INFO)
 
@@ -260,7 +266,9 @@ def main() -> int:
 
     logger.info("Training config created:")
     logger.info("  Epochs: unlimited (early stopping after 10 epochs no improvement)")
-    logger.info("  Early stopping patience: %d", training_config.early_stopping_patience)
+    logger.info(
+        "  Early stopping patience: %d", training_config.early_stopping_patience
+    )
     logger.info("  Checkpoint directory: %s", training_config.checkpoint_dir)
     logger.info("  WandB enabled: %s", training_config.wandb_enabled)
 
@@ -287,4 +295,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

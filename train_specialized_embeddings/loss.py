@@ -6,6 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class TripletLossWrapper:
     """
     Wrapper around PyTorch triplet loss with reward tracking for UCB sampler.
@@ -80,4 +81,3 @@ class TripletLossWrapper:
         loss = self(anchor, positive, negative)
         # Reward is negative loss (higher loss = lower reward)
         return -loss.item()
-
