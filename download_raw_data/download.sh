@@ -51,8 +51,8 @@ FILTERED_TXT_FILE="$SCRIPT_DIR/dataset_unaligned_aria2c_filtered.txt"
 # Function to install aria2c locally
 install_aria2_locally() {
     local install_dir="$SCRIPT_DIR/bin"
-    # URL for a static build of aria2c 1.36.0
-    local aria2_url="https://github.com/q3aql/aria2-static-builds/releases/download/v1.36.0/aria2-1.36.0-linux-gnu-64bit-build1.tar.bz2"
+    # URL for a static build of aria2c 1.37.0
+    local aria2_url="https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.bz2"
     
     echo "Attempting to install aria2c locally to $install_dir..."
     mkdir -p "$install_dir"
