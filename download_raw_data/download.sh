@@ -249,28 +249,75 @@ else
     echo "Including all files (including problematic ones)"
 fi
 
-# Run download
+# Validate input file exists and has content
+if [ ! -f "$INPUT_FILE" ]; then
+    echo "Error: Input file $INPUT_FILE does not exist"
+    exit 1
+fi
+
+INPUT_LINES=$(wc -l < "$INPUT_FILE")
+if [ "$INPUT_LINES" -eq 0 ]; then
+    echo "Error: Input file $INPUT_FILE is empty"
+    exit 1
+fi
+
+echo "Input file contains $INPUT_LINES lines"
 echo "Starting download to $OUTPUT_DIR..."
 
+# Count files before download for validation
+FILES_BEFORE=$(find "$OUTPUT_DIR" -type f 2>/dev/null | wc -l)
+
 if [ "$USE_ARIA2" = true ]; then
+    # Run aria2c with verbose output and log to see what's happening
+    echo "Running aria2c with verbose output..."
     aria2c \
         --auto-file-renaming=false \
         --continue \
         --split=5 \
         --max-connection-per-server=5 \
+        --summary-interval=10 \
+        --console-log-level=notice \
         -d "$OUTPUT_DIR" \
-        -i "$INPUT_FILE"
-        
-    EXIT_CODE=$?
+        -i "$INPUT_FILE" \
+        2>&1 | tee /tmp/aria2c_download.log
+    
+    EXIT_CODE=${PIPESTATUS[0]}
+    
+    # Check aria2c log for errors
+    if grep -q "ERROR\|Exception\|Failed" /tmp/aria2c_download.log; then
+        echo "Warning: aria2c log contains errors. Check /tmp/aria2c_download.log"
+    fi
 else
     download_sequential "$INPUT_FILE" "$OUTPUT_DIR"
     EXIT_CODE=$?
 fi
 
+# Count files after download
+FILES_AFTER=$(find "$OUTPUT_DIR" -type f 2>/dev/null | wc -l)
+FILES_DOWNLOADED=$((FILES_AFTER - FILES_BEFORE))
+
+# Validate that files were actually downloaded
 if [ $EXIT_CODE -eq 0 ]; then
-    echo "Download completed successfully!"
+    if [ "$FILES_DOWNLOADED" -le 0 ] && [ "$FILES_BEFORE" -eq 0 ]; then
+        echo "Error: Download reported success but no files were downloaded!"
+        echo "Files before: $FILES_BEFORE, Files after: $FILES_AFTER"
+        echo "Please check:"
+        echo "  1. Input file format: $INPUT_FILE"
+        echo "  2. Output directory permissions: $OUTPUT_DIR"
+        echo "  3. Network connectivity"
+        if [ "$USE_ARIA2" = true ]; then
+            echo "  4. aria2c log: /tmp/aria2c_download.log"
+        fi
+        exit 1
+    else
+        echo "Download completed successfully! ($FILES_DOWNLOADED new file(s), $FILES_AFTER total)"
+    fi
 else
-    echo "Error: Download failed"
+    echo "Error: Download failed with exit code $EXIT_CODE"
+    if [ "$USE_ARIA2" = true ] && [ -f /tmp/aria2c_download.log ]; then
+        echo "Last 20 lines of aria2c log:"
+        tail -n 20 /tmp/aria2c_download.log
+    fi
     exit 1
 fi
 
