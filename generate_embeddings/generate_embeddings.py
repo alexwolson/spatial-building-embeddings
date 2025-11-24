@@ -582,8 +582,19 @@ def main() -> int:
     # Override with command-line arguments if provided
     if args.parquet_file is not None:
         config.parquet_file = args.parquet_file
+        # Re-detect tar file since parquet file changed (overriding any config-based tar file)
+        try:
+            config.tar_file = config._auto_detect_tar_file()
+        except Exception as e:
+            logger.error(f"Failed to auto-detect tar file for {config.parquet_file}: {e}")
+            return 1
+
     if args.temp_dir is not None:
         config.temp_dir = args.temp_dir
+
+    if config.parquet_file is None:
+        logger.error("Parquet file must be provided via config or command line arguments.")
+        return 1
 
     if config.log_file:
         logger = setup_logging(config.log_file)

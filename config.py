@@ -107,8 +107,8 @@ class GenerateEmbeddingsConfig(BaseSettings):
         extra="ignore",
     )
 
-    parquet_file: Path = Field(
-        ..., description="Path to intermediate parquet file to process"
+    parquet_file: Path | None = Field(
+        None, description="Path to intermediate parquet file to process"
     )
     tar_file: Path | None = Field(
         None, description="Optional: tar file path (auto-detect if None)"
@@ -132,7 +132,7 @@ class GenerateEmbeddingsConfig(BaseSettings):
 
     def model_post_init(self, __context):
         """Auto-detect tar file if not provided."""
-        if self.tar_file is None:
+        if self.parquet_file is not None and self.tar_file is None:
             self.tar_file = self._auto_detect_tar_file()
 
     def _auto_detect_tar_file(self) -> Path:
@@ -446,8 +446,6 @@ def load_config_from_file(
     elif config_type == "generate_embeddings":
         merged_data.update(data.get("paths", {}))
         merged_data.update(data.get("embedding_model", {}))
-        if "parquet_file" not in merged_data:
-            merged_data["parquet_file"] = "data/intermediates/placeholder.parquet"
     elif config_type == "triplet_training":
         merged_data.update(data.get("paths", {}))
         merged_data.update(data.get("training_model", {}))
