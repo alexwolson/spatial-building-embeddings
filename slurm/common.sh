@@ -63,7 +63,8 @@ read_toml_value() {
     local key="$3"
     
     if [ ! -f "${toml_file}" ]; then
-        error_exit "Config file not found: ${toml_file}" 1
+        echo "Config file not found: ${toml_file}" >&2
+        return 1
     fi
     
     # Use python for robust TOML parsing (requires Python 3.11+)
@@ -73,11 +74,19 @@ import sys
 try:
     with open('${toml_file}', 'rb') as f:
         data = tomllib.load(f)
+    if '${section}' not in data:
+        print(f\"Section [${section}] not found in config file\", file=sys.stderr)
+        sys.exit(1)
     val = data.get('${section}', {}).get('${key}')
     if val is None:
+        print(f\"Key '${key}' not found in section [${section}] of config file\", file=sys.stderr)
         sys.exit(1)
     print(val)
-except Exception:
+except FileNotFoundError:
+    print(f\"Config file not found: ${toml_file}\", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f\"Error reading config: {e}\", file=sys.stderr)
     sys.exit(1)
 " || return 1
 }

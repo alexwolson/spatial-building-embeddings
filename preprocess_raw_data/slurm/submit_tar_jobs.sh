@@ -100,18 +100,41 @@ info "Project root: ${PROJECT_ROOT}"
 
 # Step 3: Read output dir from config
 CONFIG_FILE="${PROJECT_ROOT}/config.toml"
-OUTPUT_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "intermediates_dir")
-if [ -z "${OUTPUT_DIR}" ]; then error_exit "intermediates_dir not found in [paths] section of config.toml" 1; fi
+if [ ! -f "${CONFIG_FILE}" ]; then
+    error_exit "Config file not found: ${CONFIG_FILE}" 1
+fi
+info "Reading config from: ${CONFIG_FILE}"
+set +e
+OUTPUT_DIR=$(read_toml_value "${CONFIG_FILE}" "paths" "intermediates_dir" 2>&1)
+READ_TOML_EXIT=$?
+set -e
+if [ ${READ_TOML_EXIT} -ne 0 ]; then
+    ERROR_MSG="${OUTPUT_DIR:-unknown error}"
+    error_exit "Failed to read intermediates_dir from [paths] section of config.toml: ${ERROR_MSG}" 1
+fi
+if [ -z "${OUTPUT_DIR}" ]; then 
+    error_exit "intermediates_dir is empty in [paths] section of config.toml" 1
+fi
 
 # Step 4: Setup Python environment
-setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,rich,pydantic,PIL"
+info "Setting up Python environment..."
+setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,rich,pydantic,PIL" || {
+    error_exit "Python environment setup failed" 4
+}
 
 info "Environment setup complete, proceeding to job submission..."
 
 # Step 5: Create output and log directories
 mkdir -p "${OUTPUT_DIR}" || error_exit "Failed to create output directory: ${OUTPUT_DIR}" 2
 
-LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "")
+set +e
+LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "" 2>&1)
+GET_LOG_EXIT=$?
+set -e
+if [ ${GET_LOG_EXIT} -ne 0 ]; then
+    ERROR_MSG="${LOG_DIR:-unknown error}"
+    error_exit "Failed to get log directory from config: ${ERROR_MSG}" 1
+fi
 mkdir -p "${LOG_DIR}" || error_exit "Failed to create log directory: ${LOG_DIR}" 2
 
 info "Output directory: ${OUTPUT_DIR}"
