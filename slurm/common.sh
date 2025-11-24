@@ -143,9 +143,16 @@ setup_python_env() {
     done
 
     if [ "${no_venv}" = false ]; then
-        # Check Python module
-        if ! module avail "${python_module}" 2>/dev/null | grep -q "${python_module}"; then
-             error_exit "Python module not available: ${python_module}" 3
+        # Check Python module - try module avail first, then module spider as fallback
+        # module avail shows available modules, module spider shows all versions
+        local module_found=false
+        if module avail "${python_module}" 2>/dev/null | grep -Fq "${python_module}"; then
+            module_found=true
+        elif module spider "${python_module}" 2>/dev/null | grep -Fq "${python_module}"; then
+            module_found=true
+        fi
+        if [ "${module_found}" = false ]; then
+            error_exit "Python module not available: ${python_module}. Try: module spider python" 3
         fi
 
         # Load Arrow module (gcc dependency usually handled by module system or pre-load)
@@ -202,8 +209,15 @@ setup_python_env() {
         fi
     else
         info "Using system Python (--no-venv specified)"
-        if ! module avail "${python_module}" 2>/dev/null | grep -q "${python_module}"; then
-            error_exit "Python module not available: ${python_module}" 3
+        # Check Python module - try module avail first, then module spider as fallback
+        local module_found=false
+        if module avail "${python_module}" 2>/dev/null | grep -Fq "${python_module}"; then
+            module_found=true
+        elif module spider "${python_module}" 2>/dev/null | grep -Fq "${python_module}"; then
+            module_found=true
+        fi
+        if [ "${module_found}" = false ]; then
+            error_exit "Python module not available: ${python_module}. Try: module spider python" 3
         fi
         # No venv path to return/export
     fi
