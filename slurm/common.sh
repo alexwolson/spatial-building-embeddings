@@ -197,7 +197,10 @@ setup_python_env() {
                 pip install uv || error_exit "Failed to install uv" 4
             fi
             
-            uv venv "${venv_path}" || error_exit "Failed to create virtual environment" 4
+            # Explicitly use the python interpreter from the loaded module
+            local python_exec
+            python_exec=$(which python)
+            uv venv "${venv_path}" --python "${python_exec}" || error_exit "Failed to create virtual environment" 4
             source "${venv_path}/bin/activate" || error_exit "Failed to activate virtual environment" 4
             
             pushd "${project_root}" > /dev/null
