@@ -15,7 +15,7 @@
 #   --mem-per-cpu <MEM>      Memory per CPU (default: 32G, for large tar files up to 18GB)
 #   --resume                  Skip already-processed tar files
 #   --venv-path <PATH>        Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
-#   --python-module <MODULE>  Python module to load (default: python/3.12.4)
+#   --python-module <MODULE>  Python module to load (default: python/3.11.5)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
 #   --no-venv                 Use system Python instead of creating/using venv
 #   --help                    Show this help message
@@ -43,7 +43,7 @@ MAX_CONCURRENT=""
 MEM_PER_CPU="32G"
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
-PYTHON_MODULE="python/3.12.4"
+PYTHON_MODULE="python/3.11.5"
 ARROW_MODULE="arrow/17.0.0"
 PROJECT_ROOT=""
 NO_VENV=false

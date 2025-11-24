@@ -14,7 +14,7 @@
 #   --cpus <N>                 CPUs to request (default: 32)
 #   --dependency <JOB_ID>      Job ID(s) to wait for before starting
 #   --venv-path <DIR>          Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
-#   --python-module <MODULE>   Python module to load (default: python/3.12)
+#   --python-module <MODULE>   Python module to load (default: python/3.11.5)
 #   --arrow-module <MODULE>    Arrow module to load (default: arrow/17.0.0)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
 #   --no-venv                  Use system Python instead of creating/using venv
@@ -42,7 +42,7 @@ MEM="220G"
 CPUS=32
 DEPENDENCY=""
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
-PYTHON_MODULE="python/3.12"
+PYTHON_MODULE="python/3.11.5"
 ARROW_MODULE="arrow/17.0.0"
 PROJECT_ROOT=""
 NO_VENV=false

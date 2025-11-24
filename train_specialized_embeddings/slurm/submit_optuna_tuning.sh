@@ -21,7 +21,7 @@
 #   --time <HH:MM:SS>           Wall clock limit per worker (default: 24:00:00)
 #   --mem <MEM>                 Memory per worker (default: 64G)
 #   --cpus <N>                  CPU count per worker (default: 8)
-#   --python-module <MODULE>    Python module to load (default: python/3.12)
+#   --python-module <MODULE>    Python module to load (default: python/3.11.5)
 #   --venv-path <PATH>          Virtual environment path (default: ~/venv/spatial-building-embeddings)
 #   --no-venv                   Use system Python instead of managing a venv
 #   --project-root <PATH>       Override project root (defaults to repo root)
@@ -54,7 +54,7 @@ SQLITE_TIMEOUT="60"
 TIME_LIMIT="01:00:00"
 MEM="256G"
 CPUS="8"
-PYTHON_MODULE="python/3.12"
+PYTHON_MODULE="python/3.11.5"
 ARROW_MODULE="arrow/17.0.0"
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
 PROJECT_ROOT=""

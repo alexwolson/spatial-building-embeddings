@@ -15,7 +15,7 @@
 #   --resume                    Skip already-processed parquet files
 #   Note: model_name and batch_size come from config.toml only
 #   --venv-path <PATH>         Path to Python virtual environment (default: ~/venv/spatial-building-embeddings)
-#   --python-module <MODULE>   Python module to load (default: python/3.12)
+#   --python-module <MODULE>   Python module to load (default: python/3.11.5)
 #   --project-root <DIR>       Path to project root directory (default: auto-detect)
 #   --no-venv                  Use system Python instead of creating/using venv
 #   --test                     Submit only 0061.parquet for testing (smallest file)
@@ -43,7 +43,7 @@ MAX_CONCURRENT=""
 MEM_PER_CPU="48G"
 RESUME=false
 VENV_PATH="${HOME}/venv/spatial-building-embeddings"
-PYTHON_MODULE="python/3.12"
+PYTHON_MODULE="python/3.11.5"
 ARROW_MODULE="arrow/17.0.0"
 PROJECT_ROOT=""
 NO_VENV=false
