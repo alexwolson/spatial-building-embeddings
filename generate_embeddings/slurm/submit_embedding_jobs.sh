@@ -111,7 +111,7 @@ fi
 info "Found ${PARQUET_COUNT} parquet file(s) in ${INTERMEDIATES_DIR}"
 
 # Step 4: Setup Python environment
-setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,rich,pydantic,PIL,torch,timm"
+setup_python_env "${PROJECT_ROOT}" "${VENV_PATH}" "${PYTHON_MODULE}" "${ARROW_MODULE}" "${NO_VENV}" "pandas,rich,pydantic,PIL,torch,timm,einops"
 
 info "Environment setup complete, proceeding to job submission..."
 

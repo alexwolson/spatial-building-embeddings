@@ -9,6 +9,7 @@ description = "Unified pipeline for preprocessing, embedding generation, difficu
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "black>=25.11.0",
+    "einops>=0.8.0",
     "huggingface-hub>=0.36.0",
     "optuna>=4.6.0",
     "pandas>=2.3.3",
