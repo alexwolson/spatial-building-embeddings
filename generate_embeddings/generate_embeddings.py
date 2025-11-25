@@ -108,7 +108,7 @@ def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
     # Load Model
     try:
         model = AutoModel.from_pretrained(
-            model_name, trust_remote_code=True, safe_serialization=True
+            model_name, trust_remote_code=True
         )
     except Exception as e:
         raise RuntimeError(f"Failed to load model {model_name}: {e}")
