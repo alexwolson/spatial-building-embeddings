@@ -9,7 +9,7 @@
 #
 # Options:
 #   --account <ACCOUNT>        SLURM account name (required, or use SLURM_ACCOUNT env var)
-#   --time <TIME>              Time limit (default: 08:00:00)
+#   --time <TIME>              Time limit (default: 00:10:00)
 #   --mem <MEM>                Memory requirement (default: 220G)
 #   --cpus <N>                 CPUs to request (default: 32)
 #   --dependency <JOB_ID>      Job ID(s) to wait for before starting
@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 ACCOUNT="${SLURM_ACCOUNT:-}"
-TIME="08:00:00"
+TIME="00:10:00"
 MEM="220G"
 CPUS=32
 DEPENDENCY=""
