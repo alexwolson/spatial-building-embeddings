@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Default values
 ACCOUNT="${SLURM_ACCOUNT:-}"
-TIME="00:10:00"
+TIME="08:00:00"
 MEM="220G"
 CPUS=32
 DEPENDENCY=""
