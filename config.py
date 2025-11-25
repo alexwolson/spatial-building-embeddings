@@ -163,6 +163,13 @@ class GenerateEmbeddingsConfig(BaseSettings):
         tar_file_raw = raw_dir / f"{dataset_id:04d}.tar"
         if tar_file_raw.exists():
             return tar_file_raw
+            
+        # Try raw/dataset_unaligned/ directory (another common structure)
+        # Assuming structure: data/intermediates/0061.parquet -> data/raw/dataset_unaligned/0061.tar
+        raw_unaligned_dir = raw_dir / "dataset_unaligned"
+        tar_file_unaligned = raw_unaligned_dir / f"{dataset_id:04d}.tar"
+        if tar_file_unaligned.exists():
+            return tar_file_unaligned
 
         # Try absolute path data/raw/ from project root
         # Walk up from parquet file to find project root (has pyproject.toml)
@@ -172,13 +179,19 @@ class GenerateEmbeddingsConfig(BaseSettings):
                 tar_file_project = current / "data" / "raw" / f"{dataset_id:04d}.tar"
                 if tar_file_project.exists():
                     return tar_file_project
+                
+                # Check data/raw/dataset_unaligned/ from project root
+                tar_file_project_unaligned = current / "data" / "raw" / "dataset_unaligned" / f"{dataset_id:04d}.tar"
+                if tar_file_project_unaligned.exists():
+                    return tar_file_project_unaligned
+
             if current.parent == current:  # Reached root
                 break
             current = current.parent
 
         raise FileNotFoundError(
             f"Could not find tar file for dataset ID {dataset_id:04d}. "
-            f"Tried: {tar_file_same_dir}, {tar_file_raw}, and data/raw/{dataset_id:04d}.tar"
+            f"Tried: {tar_file_same_dir}, {tar_file_raw}, {tar_file_unaligned}, and {tar_file_project} (and dataset_unaligned variants)"
         )
 
 
