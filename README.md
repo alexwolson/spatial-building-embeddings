@@ -15,8 +15,11 @@ flowchart TD
     
     D[submit_merge.sh<br/>Merge & create splits]
     
-    E[submit_difficulty_metadata.sh<br/>Compute difficulty metadata]
-    F[submit_visual_neighbors.sh<br/>Compute visual neighbors]
+    subgraph Metadata [Difficulty Metadata (Choose One)]
+        E[submit_difficulty_metadata.sh<br/>Geographic neighbors]
+        F[submit_visual_neighbors.sh<br/>Visual neighbors]
+    end
+    
     G[submit_optuna_tuning.sh<br/>Hyperparameter tuning]
     H[submit_best_training.sh<br/>Train with best params]
     
@@ -24,10 +27,15 @@ flowchart TD
     A --> C
     A --> D
     C --> D
+    
     D --> E
+    B --> F
+    
     D --> G
     D --> H
-    B --> F
+    
+    E --> G
+    E --> H
     F --> G
     F --> H
     
@@ -40,4 +48,6 @@ flowchart TD
     style G fill:#f0e1f5
     style H fill:#f0e1f5
 ```
+
+**Note**: Training requires difficulty metadata, which can be generated **either** geographically (`submit_difficulty_metadata.sh`) **or** visually (`submit_visual_neighbors.sh`). You do not need to run both; choose the method that suits your experiment.
 
