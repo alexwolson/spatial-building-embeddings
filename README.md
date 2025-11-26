@@ -28,6 +28,8 @@ flowchart TD
     D --> G
     D --> H
     B --> F
+    F --> G
+    F --> H
     
     style A fill:#e1f5e1
     style B fill:#e1f0f5
