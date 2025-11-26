@@ -60,6 +60,22 @@ class TripletDataset(Dataset):
         missing = required_cols - set(embeddings_df.columns)
         if missing:
             raise ValueError(f"Missing required columns in embeddings_df: {missing}")
+            
+        # Ensure streetview_image_id is present
+        if "streetview_image_id" not in embeddings_df.columns:
+            # Fallback for legacy data or if merge_and_split didn't add it
+            # This is risky if IDs don't match metadata, but better than crashing if reproducible
+            if "dataset_id" in embeddings_df.columns and "patch_id" in embeddings_df.columns:
+                 dataset_str = embeddings_df["dataset_id"].astype(int).astype(str).str.zfill(4)
+                 patch_str = embeddings_df["patch_id"].astype(int).astype(str)
+                 self.streetview_image_ids = (dataset_str + "_" + patch_str).to_numpy(copy=False)
+            elif "target_coord_hash" in embeddings_df.columns:
+                 # Fallback to coordinate hash if that was used as key (legacy spatial mode)
+                 self.streetview_image_ids = embeddings_df["target_coord_hash"].astype(str).to_numpy(copy=False)
+            else:
+                 raise ValueError("streetview_image_id column missing and cannot be inferred.")
+        else:
+            self.streetview_image_ids = embeddings_df["streetview_image_id"].astype(str).to_numpy(copy=False)
 
         # Materialise embeddings once and place them in shared memory for DataLoader workers
         logger.info("Materialising embedding tensor for triplet sampling...")
@@ -109,21 +125,7 @@ class TripletDataset(Dataset):
         self.samples_per_epoch = self.total_anchor_candidates
 
         # Build difficulty metadata index
-        # Map building_id to coordinate hash for matching with difficulty metadata
-        if "target_coord_hash" in embeddings_df.columns:
-            self.building_to_coord_hash = dict(
-                zip(
-                    embeddings_df["building_id"].astype(str),
-                    embeddings_df["target_coord_hash"].astype(str),
-                )
-            )
-        else:
-            self.building_to_coord_hash = {}
-            logger.warning(
-                "target_coord_hash not found in embeddings_df. "
-                "Difficulty metadata matching may be limited."
-            )
-
+        # Map streetview_image_id to neighbors and difficulty bands
         self._build_difficulty_index(difficulty_metadata_df)
 
         # Initialize UCB sampler
@@ -136,7 +138,7 @@ class TripletDataset(Dataset):
         self.total_samples_generated = 0
 
     def _build_difficulty_index(self, difficulty_metadata_df: pd.DataFrame):
-        """Build index mapping building_id to neighbors and difficulty bands."""
+        """Build index mapping streetview_image_id to neighbors and difficulty bands."""
         required_cols = {"target_coord_hash", "neighbor_building_ids", "neighbor_bands"}
         missing = required_cols - set(difficulty_metadata_df.columns)
         if missing:
@@ -144,36 +146,23 @@ class TripletDataset(Dataset):
                 f"Missing required columns in difficulty_metadata_df: {missing}"
             )
 
-        # Create mapping from building_id to neighbors by band
-        # Difficulty metadata uses target_coord_hash as key, so we need to map via coordinate hash
-        self.building_to_neighbors: dict[str, list[str]] = {}
-        self.building_to_bands: dict[str, list[int]] = {}
-        self.building_to_distances: dict[str, list[float]] = {}
+        # Create mapping from image_id to neighbors by band
+        # Note: In the new visual difficulty metadata, 'target_coord_hash' column actually contains 'streetview_image_id'
+        self.image_to_neighbors: dict[str, list[str]] = {}
+        self.image_to_bands: dict[str, list[int]] = {}
 
-        # Build mapping from coord_hash to list of building_ids (reverse of building_to_coord_hash)
-        # Note: One coordinate hash might map to multiple building_ids (e.g. same building, different angles/ids)
-        coord_hash_to_buildings: dict[str, list[str]] = defaultdict(list)
-        for bid, hash_val in self.building_to_coord_hash.items():
-            coord_hash_to_buildings[hash_val].append(bid)
-
-        # Index difficulty metadata by coordinate hash, then map to all building_ids at that location
+        # Index difficulty metadata by image ID (stored in target_coord_hash column)
         for _, row in difficulty_metadata_df.iterrows():
-            coord_hash = str(row["target_coord_hash"])
-            if coord_hash in coord_hash_to_buildings:
-                # Apply metadata to ALL buildings at this location
-                for building_id in coord_hash_to_buildings[coord_hash]:
-                    neighbors = self._ensure_sequence(row["neighbor_building_ids"])
-                    bands = self._ensure_sequence(row["neighbor_bands"])
-                    distances = self._ensure_sequence(
-                        row.get("neighbor_distances_meters", [0.0] * len(neighbors))
-                    )
-
-                    self.building_to_neighbors[building_id] = neighbors
-                    self.building_to_bands[building_id] = bands
-                    self.building_to_distances[building_id] = distances
+            image_id = str(row["target_coord_hash"]) # Effectively streetview_image_id
+            
+            neighbors = self._ensure_sequence(row["neighbor_building_ids"])
+            bands = self._ensure_sequence(row["neighbor_bands"])
+            
+            self.image_to_neighbors[image_id] = neighbors
+            self.image_to_bands[image_id] = bands
 
         logger.info(
-            f"Indexed difficulty metadata for {len(self.building_to_neighbors)} buildings"
+            f"Indexed difficulty metadata for {len(self.image_to_neighbors)} images"
         )
 
     def __len__(self) -> int:
@@ -200,7 +189,9 @@ class TripletDataset(Dataset):
         positive_idx = int(positive_idx)
 
         # Sample negative using UCB-guided difficulty band selection
-        negative_idx, difficulty_band = self._sample_negative(building_id)
+        # Pass the anchor's specific image ID to find its specific visual neighbors
+        anchor_image_id = self.streetview_image_ids[anchor_idx]
+        negative_idx, difficulty_band = self._sample_negative(anchor_image_id, building_id)
 
         # Get embeddings
         anchor_emb = self.embeddings[anchor_idx]
@@ -217,18 +208,18 @@ class TripletDataset(Dataset):
             difficulty_band=difficulty_band,
         )
 
-    def _sample_negative(self, anchor_building_id: str) -> tuple[int, int]:
+    def _sample_negative(self, anchor_image_id: str, anchor_building_id: str) -> tuple[int, int]:
         """
         Sample a negative building using UCB-guided difficulty band selection.
 
         Returns:
             Tuple of (negative_idx, difficulty_band)
         """
-        # Get neighbors and bands for this building
+        # Get neighbors and bands for this anchor image
         neighbors = self._ensure_sequence(
-            self.building_to_neighbors.get(anchor_building_id)
+            self.image_to_neighbors.get(anchor_image_id)
         )
-        bands = self._ensure_sequence(self.building_to_bands.get(anchor_building_id))
+        bands = self._ensure_sequence(self.image_to_bands.get(anchor_image_id))
 
         if len(neighbors) == 0 or len(bands) == 0:
             # Fallback: sample random building that's not the anchor

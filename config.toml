@@ -27,6 +27,7 @@ log_dir = "/home/awolson/scratch/spatial-building-embeddings/logs"
 intermediates_dir = "/home/awolson/scratch/spatial-building-embeddings/intermediates"      # Output of process_tar, input to merge_and_split
 embeddings_dir = "/home/awolson/scratch/spatial-building-embeddings/embeddings-dinov3"            # Output of generate_embeddings, input to merge_and_split
 merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged"                    # Output of merge_and_split, input to difficulty_metadata and triplet_training
+fingerprints_dir = "/home/awolson/scratch/spatial-building-embeddings/fingerprints"          # Output of compute_fingerprints
 
 # Training data paths
 train_parquet_path = "/home/awolson/scratch/spatial-building-embeddings/merged/train.parquet"
@@ -80,6 +81,7 @@ test_ratio = 0.15
 neighbors = 150                    # Number of neighbours to retain per anchor
 k0_for_local_scale = 50           # Neighbour rank used to define the local scale L(a)
 sample_fraction_for_bands = 0.03  # Fraction of anchors sampled to calibrate band edges
+pca_components = 32               # Number of PCA components to reduce fingerprints to
 
 [infrastructure]
 # Device and performance settings
@@ -89,6 +91,9 @@ sample_fraction_for_bands = 0.03  # Fraction of anchors sampled to calibrate ban
 distance_dtype = "float32"  # Floating point precision: "float32" or "float64"
 batch_size = 100000         # Number of anchors to process per BallTree query batch (for difficulty_metadata)
 row_group_size = 50000      # Row group size for the output parquet writer
+
+[fingerprints]
+image_size = 16  # Size of the square fingerprint image (e.g., 16x16)
 
 [logging]
 # Logging and monitoring settings

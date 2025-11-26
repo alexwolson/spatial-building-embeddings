@@ -199,6 +199,81 @@ class GenerateEmbeddingsConfig(BaseSettings):
         )
 
 
+class ComputeFingerprintsConfig(BaseSettings):
+    """Configuration for computing pixel fingerprints."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="COMPUTE_FINGERPRINTS_",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    parquet_file: Path | None = Field(
+        None, description="Path to intermediate parquet file to process"
+    )
+    tar_file: Path | None = Field(
+        None, description="Optional: tar file path (auto-detect if None)"
+    )
+    fingerprints_dir: Path = Field(
+        ..., description="Output directory for fingerprint parquet files (shared pipeline location)"
+    )
+    image_size: int = Field(
+        16, description="Size of the square fingerprint image (e.g., 16x16)"
+    )
+    temp_dir: Path | None = Field(
+        None, description="Optional temporary directory for extraction"
+    )
+    log_file: Path | None = Field(None, description="Optional log file path")
+
+    def model_post_init(self, __context):
+        """Auto-detect tar file if not provided."""
+        if self.parquet_file is not None and self.tar_file is None:
+            self.tar_file = self._auto_detect_tar_file()
+
+    def _auto_detect_tar_file(self) -> Path:
+        """Reuse the logic from GenerateEmbeddingsConfig, duplicated here for simplicity."""
+        parquet_stem = self.parquet_file.stem
+        try:
+            dataset_id = int(parquet_stem)
+        except ValueError:
+            raise ValueError(
+                f"Could not extract dataset ID from parquet filename: {self.parquet_file}. "
+                "Expected format: <dataset_id>.parquet (e.g., 0061.parquet)"
+            )
+
+        tar_file_same_dir = self.parquet_file.parent / f"{dataset_id:04d}.tar"
+        if tar_file_same_dir.exists():
+            return tar_file_same_dir
+
+        raw_dir = self.parquet_file.parent.parent / "raw"
+        tar_file_raw = raw_dir / f"{dataset_id:04d}.tar"
+        if tar_file_raw.exists():
+            return tar_file_raw
+
+        raw_unaligned_dir = raw_dir / "dataset_unaligned"
+        tar_file_unaligned = raw_unaligned_dir / f"{dataset_id:04d}.tar"
+        if tar_file_unaligned.exists():
+            return tar_file_unaligned
+
+        current = self.parquet_file.parent
+        for _ in range(5):
+            if (current / "pyproject.toml").exists():
+                tar_file_project = current / "data" / "raw" / f"{dataset_id:04d}.tar"
+                if tar_file_project.exists():
+                    return tar_file_project
+                
+                tar_file_project_unaligned = current / "data" / "raw" / "dataset_unaligned" / f"{dataset_id:04d}.tar"
+                if tar_file_project_unaligned.exists():
+                    return tar_file_project_unaligned
+            if current.parent == current:
+                break
+            current = current.parent
+
+        raise FileNotFoundError(
+            f"Could not find tar file for dataset ID {dataset_id:04d}."
+        )
+
+
 class TripletTrainingConfig(BaseSettings):
     """Configuration for triplet loss training."""
 
@@ -350,6 +425,10 @@ class DifficultyMetadataConfig(BaseSettings):
         Path("difficulty_metadata.parquet"),
         description="Destination parquet file for aggregated difficulty metadata (shared pipeline location).",
     )
+    fingerprints_dir: Path = Field(
+        ...,
+        description="Directory containing computed image fingerprints.",
+    )
     neighbors: PositiveInt = Field(
         150,
         description="Number of neighbours to retain per anchor.",
@@ -376,6 +455,10 @@ class DifficultyMetadataConfig(BaseSettings):
         50_000,
         description="Row group size for the output parquet writer.",
     )
+    pca_components: PositiveInt = Field(
+        32,
+        description="Number of PCA components to reduce fingerprints to.",
+    )
     seed: int | None = Field(
         None, description="Random seed (inherits from global if not set)"
     )
@@ -397,6 +480,7 @@ def load_config_from_file(
         "generate_embeddings",
         "triplet_training",
         "difficulty_metadata",
+        "compute_fingerprints",
     ],
 ) -> Union[
     ProcessTarConfig,
@@ -404,6 +488,7 @@ def load_config_from_file(
     GenerateEmbeddingsConfig,
     TripletTrainingConfig,
     DifficultyMetadataConfig,
+    ComputeFingerprintsConfig,
 ]:
     """
     Load configuration from a unified TOML file organized by type.
@@ -417,6 +502,7 @@ def load_config_from_file(
     - [data]: Data processing settings (splits, neighbors, etc.)
     - [infrastructure]: Device, workers, and performance settings
     - [logging]: Logging and monitoring settings
+    - [fingerprints]: Fingerprint generation settings
 
     Args:
         config_path: Path to config file (must be .toml)
@@ -474,6 +560,9 @@ def load_config_from_file(
         merged_data.update(data.get("data", {}))
         # Infrastructure: merge all fields (including batch_size for difficulty_metadata)
         merged_data.update(data.get("infrastructure", {}))
+    elif config_type == "compute_fingerprints":
+        merged_data.update(data.get("paths", {}))
+        merged_data.update(data.get("fingerprints", {}))
     else:
         raise ValueError(f"Unknown config type: {config_type}")
 
@@ -488,5 +577,6 @@ def load_config_from_file(
         "generate_embeddings": GenerateEmbeddingsConfig,
         "triplet_training": TripletTrainingConfig,
         "difficulty_metadata": DifficultyMetadataConfig,
+        "compute_fingerprints": ComputeFingerprintsConfig,
     }
     return config_classes[config_type](**merged_data)
