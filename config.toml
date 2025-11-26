@@ -26,7 +26,7 @@ log_dir = "/home/awolson/scratch/spatial-building-embeddings/logs"
 # Pipeline directory paths (shared across workflows)
 intermediates_dir = "/home/awolson/scratch/spatial-building-embeddings/intermediates"      # Output of process_tar, input to merge_and_split
 embeddings_dir = "/home/awolson/scratch/spatial-building-embeddings/embeddings-dinov3"            # Output of generate_embeddings, input to merge_and_split
-merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged"                    # Output of merge_and_split, input to difficulty_metadata and triplet_training
+merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged"                    # Output of merge_and_split, input to triplet_training
 fingerprints_dir = "/home/awolson/scratch/spatial-building-embeddings/fingerprints"          # Output of compute_fingerprints
 
 # Training data paths
