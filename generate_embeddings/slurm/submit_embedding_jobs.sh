@@ -21,11 +21,13 @@
 #   --test                     Submit only 0061.parquet for testing (smallest file)
 #   --help                     Show this help message
 #
-# GPU Requirements:
-#   - For DINOv3 ViT-7B: Requires H100 80GB or A100 80GB GPU (model ~28GB FP32, ~14GB FP16)
+# GPU Configuration:
+#   - Configured for DINOv3 ViT-7B using H100-3g.40gb MIG instance (40GB GPU memory)
 #   - Batch size is automatically reduced in config.toml for 7B model (default: 16)
-#   - To request specific GPU type, modify generate_embeddings_array.sbatch:
-#     Change --gres=gpu:1 to --gres=gpu:h100:1 or --gres=gpu:a100:1
+#   - Using MIG instance: 6.1 RGU cost (vs 12.2 RGU for full GPU = 50% cost reduction)
+#   - Resources: 6 CPU cores, 124 GB system memory (recommended per Alliance docs)
+#   - See: https://docs.alliancecan.ca/wiki/Multi-Instance_GPU/en
+#   - See: https://docs.alliancecan.ca/wiki/Allocations_and_compute_scheduling/en
 #
 # Environment Variables:
 #   HF_TOKEN                   Hugging Face authentication token (required for gated models like DINOv3)
