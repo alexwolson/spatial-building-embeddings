@@ -288,41 +288,54 @@ def create_splits(
     seed: int,
     logger: logging.Logger,
 ) -> pd.DataFrame:
-    """Assign split labels to entries based on building_id."""
-    if "building_id" not in df.columns:
-        raise ValueError("Expected 'building_id' column to create splits.")
+    """
+    Assign split labels to entries based on target_coord_hash (spatial split).
 
-    unique_target_keys = df["building_id"].unique()
-    n_targets = len(unique_target_keys)
+    Using target_coord_hash ensures that all buildings at the same location (e.g. same building,
+    different angles/ids) end up in the same split, preventing data leakage.
+    """
+    split_key = "target_coord_hash"
+    if split_key not in df.columns:
+        logger.warning(
+            f"{split_key} not found, falling back to building_id. "
+            "WARNING: This may cause data leakage if multiple building_ids share coordinates."
+        )
+        split_key = "building_id"
 
-    logger.info(f"Splitting {n_targets:,} unique building_ids")
+    if split_key not in df.columns:
+        raise ValueError(f"Expected '{split_key}' column to create splits.")
+
+    unique_keys = df[split_key].unique()
+    n_keys = len(unique_keys)
+
+    logger.info(f"Splitting {n_keys:,} unique keys ({split_key})")
     logger.info(
         f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
     )
 
-    # Shuffle composite identifiers deterministically
+    # Shuffle keys deterministically
     rng = np.random.default_rng(seed)
-    shuffled_target_ids = rng.permutation(unique_target_keys)
+    shuffled_keys = rng.permutation(unique_keys)
 
     # Calculate split boundaries
-    n_train = int(n_targets * train_ratio)
-    n_val = int(n_targets * val_ratio)
-    # n_test = n_targets - n_train - n_val (to handle rounding)
+    n_train = int(n_keys * train_ratio)
+    n_val = int(n_keys * val_ratio)
+    # n_test = n_keys - n_train - n_val (to handle rounding)
 
-    train_ids = set(shuffled_target_ids[:n_train])
-    val_ids = set(shuffled_target_ids[n_train : n_train + n_val])
-    test_ids = set(shuffled_target_ids[n_train + n_val :])
+    train_keys = set(shuffled_keys[:n_train])
+    val_keys = set(shuffled_keys[n_train : n_train + n_val])
+    # test_keys = set(shuffled_keys[n_train + n_val :])
 
     # Assign split labels
-    df["split"] = df["building_id"].map(
-        lambda tid: (
-            "train" if tid in train_ids else ("val" if tid in val_ids else "test")
+    df["split"] = df[split_key].map(
+        lambda key: (
+            "train" if key in train_keys else ("val" if key in val_keys else "test")
         )
     )
 
     # Log split statistics
     split_counts = df["split"].value_counts()
-    logger.info("Split distribution:")
+    logger.info("Split distribution (entries):")
     for split, count in split_counts.items():
         logger.info(f"  {split}: {count:,} entries ({count/len(df):.1%})")
 

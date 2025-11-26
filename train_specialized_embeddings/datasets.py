@@ -150,23 +150,27 @@ class TripletDataset(Dataset):
         self.building_to_bands: dict[str, list[int]] = {}
         self.building_to_distances: dict[str, list[float]] = {}
 
-        # Build mapping from coord_hash to building_id (reverse of building_to_coord_hash)
-        coord_hash_to_building = {v: k for k, v in self.building_to_coord_hash.items()}
+        # Build mapping from coord_hash to list of building_ids (reverse of building_to_coord_hash)
+        # Note: One coordinate hash might map to multiple building_ids (e.g. same building, different angles/ids)
+        coord_hash_to_buildings: dict[str, list[str]] = defaultdict(list)
+        for bid, hash_val in self.building_to_coord_hash.items():
+            coord_hash_to_buildings[hash_val].append(bid)
 
-        # Index difficulty metadata by coordinate hash, then map to building_id
+        # Index difficulty metadata by coordinate hash, then map to all building_ids at that location
         for _, row in difficulty_metadata_df.iterrows():
             coord_hash = str(row["target_coord_hash"])
-            if coord_hash in coord_hash_to_building:
-                building_id = coord_hash_to_building[coord_hash]
-                neighbors = self._ensure_sequence(row["neighbor_building_ids"])
-                bands = self._ensure_sequence(row["neighbor_bands"])
-                distances = self._ensure_sequence(
-                    row.get("neighbor_distances_meters", [0.0] * len(neighbors))
-                )
+            if coord_hash in coord_hash_to_buildings:
+                # Apply metadata to ALL buildings at this location
+                for building_id in coord_hash_to_buildings[coord_hash]:
+                    neighbors = self._ensure_sequence(row["neighbor_building_ids"])
+                    bands = self._ensure_sequence(row["neighbor_bands"])
+                    distances = self._ensure_sequence(
+                        row.get("neighbor_distances_meters", [0.0] * len(neighbors))
+                    )
 
-                self.building_to_neighbors[building_id] = neighbors
-                self.building_to_bands[building_id] = bands
-                self.building_to_distances[building_id] = distances
+                    self.building_to_neighbors[building_id] = neighbors
+                    self.building_to_bands[building_id] = bands
+                    self.building_to_distances[building_id] = distances
 
         logger.info(
             f"Indexed difficulty metadata for {len(self.building_to_neighbors)} buildings"
