@@ -1,6 +1,5 @@
 # Unified configuration file for the spatial building embeddings pipeline
 # This is the actual configuration file for this project.
-# DINOv3 configuration variant
 #
 # This file is organized by type of configuration rather than by workflow:
 # - [global] section: Shared settings used across all workflows
@@ -25,7 +24,7 @@ log_dir = "/home/awolson/scratch/spatial-building-embeddings/logs"
 [paths]
 # Pipeline directory paths (shared across workflows)
 intermediates_dir = "/home/awolson/scratch/spatial-building-embeddings/intermediates"      # Output of process_tar, input to merge_and_split
-embeddings_dir = "/home/awolson/scratch/spatial-building-embeddings/embeddings-dinov3"            # Output of generate_embeddings, input to merge_and_split
+embeddings_dir = "/home/awolson/scratch/spatial-building-embeddings/embeddings"            # Output of generate_embeddings, input to merge_and_split
 merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged"                    # Output of merge_and_split, input to difficulty_metadata and triplet_training
 
 # Training data paths
@@ -38,17 +37,11 @@ checkpoint_dir = "/home/awolson/scratch/spatial-building-embeddings/checkpoints/
 
 [embedding_model]
 # Model settings for embedding generation (generate_embeddings workflow)
-# DINOv3 models: facebook/dinov3-vits16-pretrain-lvd1689m (384 dim), 
-#                 facebook/dinov3-vitb16-pretrain-lvd1689m (768 dim),
-#                 facebook/dinov3-vitl16-pretrain-lvd1689m (1024 dim),
-#                 facebook/dinov3-vith16-pretrain-lvd1689m (1280 dim),
-#                 facebook/dinov3-vit7b16-pretrain-lvd1689m (4096 dim)
-model_name = "facebook/dinov3-vit7b16-pretrain-lvd1689m"  # ViT-7B/16: 4096 dimensions
-pooling_type = "pooler_output"  # Use pooler_output for DINOv3 (recommended)
-batch_size = 16  # Batch size for inference (reduced for 7B model - requires H100 80GB GPU)
+model_name = "nomic-ai/nomic-embed-vision-v1.5"
+batch_size = 128  # Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)
 
 [training_model]
-input_dim = 4096         # DINOv3 ViT-7B/16 embedding dimension (from pooler_output)
+input_dim = 768          # nomic-embed-vision-v1.5 embedding dimension (fixed)
 output_dim = 256         # Output embedding dimension (fixed)
 
 [training]
@@ -96,6 +89,6 @@ log_every_n_batches = 100  # Log metrics every N batches (for training)
 
 # Weights & Biases configuration
 wandb_enabled = true        # Enable Weights & Biases logging
-wandb_project = "spatial-building-embeddings-dinov3"  # wandb project name
+wandb_project = "spatial-building-embeddings-vlm"  # wandb project name
 # wandb_run_name = null       # Optional explicit run name (omit to use default: None, auto-generate)
 wandb_mode = "online"       # Use "online" to sync immediately, "offline" to defer

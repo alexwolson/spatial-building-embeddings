@@ -1,13 +1,19 @@
 #!/bin/bash
 #SBATCH --account=<ACCOUNT>          # Required: Resource Allocation Project (set via submit script)
-#SBATCH --time=24:00:00                    # Default: 4 hours (model inference takes time)
-#SBATCH --mem-per-cpu=48G                   # Model + batch processing
+#SBATCH --time=24:00:00                    # Default: 24 hours (model inference takes time)
+#SBATCH --mem-per-cpu=48G                   # CPU memory for data loading and processing
 #SBATCH --cpus-per-task=8                  # Multiple CPUs for data loading
 #SBATCH --gres=gpu:1                       # GPU required for efficient inference
 #SBATCH --array=1-1%10                     # Default: 1 task (overridden by submit script)
 #SBATCH --job-name=generate_embeddings
 #SBATCH --output=%x_%A_%a.out  # %x = job name, %A = array job ID, %a = task ID
 #SBATCH --error=%x_%A_%a.err
+#
+# GPU Requirements:
+#   - For DINOv3 ViT-7B: Requires H100 80GB or A100 80GB GPU (model is ~28GB in FP32, ~14GB in FP16)
+#   - For smaller models (ViT-B/L): H100 or A100 recommended but not strictly required
+#   - To request specific GPU type, add: #SBATCH --gres=gpu:h100:1 or #SBATCH --gres=gpu:a100:1
+#   - Check cluster documentation for available GPU types and constraints
 
 # SLURM batch script for generating embeddings for a single intermediate parquet file.
 # This script is called by submit_embedding_jobs.sh and processes one parquet file per task.

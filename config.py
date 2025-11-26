@@ -124,6 +124,10 @@ class GenerateEmbeddingsConfig(BaseSettings):
         ge=1,
         description="Batch size for inference (default: 128 for H100 80GB GPUs on Nibi)",
     )
+    pooling_type: Literal["cls_token", "pooler_output"] = Field(
+        "cls_token",
+        description="Pooling method to use: 'cls_token' (default, e.g. DINOv2) or 'pooler_output' (e.g. DINOv3)",
+    )
     # Note: GPU is always required - no device parameter, script will fail if GPU unavailable
     temp_dir: Path | None = Field(
         None, description="Optional temporary directory for extraction"

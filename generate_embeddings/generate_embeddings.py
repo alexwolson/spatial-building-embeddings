@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-Generate image embeddings for a single intermediate parquet file using a pretrained DINOv2 model.
+Generate image embeddings for a single intermediate parquet file using a pretrained vision model.
 
 This script reads an intermediate parquet file, extracts the corresponding tar file,
 loads images, generates embeddings using transformers, and writes output parquet file with embeddings.
+
+Supports various models including DINOv2, DINOv3, and other Hugging Face vision models.
+For gated models (e.g., DINOv3), ensure HF_TOKEN environment variable is set with your
+Hugging Face authentication token. Get your token from: https://huggingface.co/settings/tokens
 """
 
 import argparse
@@ -233,6 +237,7 @@ def generate_embeddings_batch(
     batch_size: int,
     extract_dir: Path,
     logger: logging.Logger,
+    pooling_type: str = "cls_token",
 ) -> np.ndarray:
     """
     Generate embeddings for a batch of images.
@@ -244,6 +249,7 @@ def generate_embeddings_batch(
         batch_size: Batch size for processing
         extract_dir: Base directory where tar was extracted
         logger: Logger instance
+        pooling_type: Pooling method to use ("cls_token" or "pooler_output")
 
     Returns:
         Numpy array of embeddings (shape: [num_images, embedding_dim])
@@ -292,15 +298,25 @@ def generate_embeddings_batch(
                 # HF models take 'pixel_values' and return a custom output object
                 outputs = model(pixel_values=batch_images)
 
-                # For DINOv2/ViT, we typically use the CLS token (first token of last hidden state)
-                # Some models have a 'pooler_output', but for raw embeddings, CLS is standard.
-                if hasattr(outputs, "last_hidden_state"):
-                    embeddings = outputs.last_hidden_state[:, 0]
-                elif hasattr(outputs, "pooler_output"):
-                    embeddings = outputs.pooler_output
+                # Extract embeddings based on pooling_type
+                if pooling_type == "pooler_output":
+                    if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+                        embeddings = outputs.pooler_output
+                    else:
+                        # Fallback if pooler_output is requested but not available
+                        # (e.g., model config didn't include pooler, or architecture differs)
+                        # We log a debug message (once per batch might be noisy, but safer) if this happens unexpectedly?
+                        # For now, silently fall back to CLS as that's usually the alternative.
+                        embeddings = outputs.last_hidden_state[:, 0]
                 else:
-                    # Fallback for some configurations, though unlikely for DINOv2
-                    embeddings = outputs[0]
+                    # Default / "cls_token" behavior
+                    if hasattr(outputs, "last_hidden_state"):
+                        embeddings = outputs.last_hidden_state[:, 0]
+                    elif hasattr(outputs, "pooler_output"):
+                        embeddings = outputs.pooler_output
+                    else:
+                        # Fallback for some configurations
+                        embeddings = outputs[0]
 
                 # Move to CPU and convert to numpy
                 embeddings_np = embeddings.cpu().numpy().astype(np.float32)
@@ -355,6 +371,7 @@ def process_intermediate_file(
     batch_size: int,
     temp_dir: Path | None = None,
     log_file: Path | None = None,
+    pooling_type: str = "cls_token",
 ) -> dict[str, int]:
     """
     Process a single intermediate parquet file and generate embeddings.
@@ -367,7 +384,8 @@ def process_intermediate_file(
         batch_size: Batch size for inference
         temp_dir: Temporary directory for extraction (optional)
         log_file: Optional log file path
-
+        pooling_type: Pooling method to use
+    
     Returns:
         Statistics dictionary
     """
@@ -504,6 +522,7 @@ def process_intermediate_file(
                 batch_size,
                 temp_extract_dir,
                 logger,
+                pooling_type=pooling_type,
             )
         except Exception as e:
             logger.error(f"Failed to generate embeddings: {e}", exc_info=True)
@@ -619,6 +638,7 @@ def main() -> int:
             batch_size=config.batch_size,
             temp_dir=config.temp_dir,
             log_file=config.log_file,
+            pooling_type=config.pooling_type,
         )
 
         logger.info("")

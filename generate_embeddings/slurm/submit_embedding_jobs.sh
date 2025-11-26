@@ -21,6 +21,19 @@
 #   --test                     Submit only 0061.parquet for testing (smallest file)
 #   --help                     Show this help message
 #
+# GPU Requirements:
+#   - For DINOv3 ViT-7B: Requires H100 80GB or A100 80GB GPU (model ~28GB FP32, ~14GB FP16)
+#   - Batch size is automatically reduced in config.toml for 7B model (default: 16)
+#   - To request specific GPU type, modify generate_embeddings_array.sbatch:
+#     Change --gres=gpu:1 to --gres=gpu:h100:1 or --gres=gpu:a100:1
+#
+# Environment Variables:
+#   HF_TOKEN                   Hugging Face authentication token (required for gated models like DINOv3)
+#                              Set this before running the script:
+#                                export HF_TOKEN="hf_..."
+#                              Or get it from: https://huggingface.co/settings/tokens
+#                              The token will be automatically passed to the SLURM jobs.
+#
 # Exit codes:
 #   0: Success
 #   1: Invalid arguments or missing required options
@@ -200,6 +213,11 @@ if [ "${NO_VENV}" = false ] && [ -n "${VENV_PATH:-}" ]; then
 fi
 if [ -n "${ARROW_MODULE:-}" ]; then
     EXPORT_VARS="${EXPORT_VARS},ARROW_MODULE=${ARROW_MODULE}"
+fi
+# Pass through HF_TOKEN if set (required for gated models like DINOv3)
+if [ -n "${HF_TOKEN:-}" ]; then
+    EXPORT_VARS="${EXPORT_VARS},HF_TOKEN=${HF_TOKEN}"
+    info "HF_TOKEN detected - will be passed to job for Hugging Face authentication"
 fi
 
 if [ -n "${MAX_CONCURRENT}" ]; then
