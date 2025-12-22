@@ -616,7 +616,9 @@ def pass2_stream_and_write(
                     )
                 
                 # Convert to Arrow table and write using the consistent schema
-                split_table = pa.Table.from_pandas(split_batch_final, schema=split_schemas[split_name], preserve_index=False)
+                split_table = pa.Table.from_pandas(
+                    split_batch_final, preserve_index=False, schema=split_schemas[split_name]
+                )
                 split_writers[split_name].write_table(split_table)
                 
                 stats[f"{split_name}_entries"] += len(split_batch)
