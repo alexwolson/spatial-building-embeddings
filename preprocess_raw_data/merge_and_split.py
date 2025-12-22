@@ -37,7 +37,6 @@ from rich.progress import (
 )
 
 from config import MergeAndSplitConfig, load_config_from_file
-from pandas.util import hash_pandas_object
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
@@ -45,17 +44,33 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO)
 
-    # Remove existing handlers
+    # Remove and close existing handlers to avoid leaking file descriptors
+    for handler in logger.handlers:
+        try:
+            # Close underlying file handle if we attached one
+            log_handle = getattr(handler, "_log_handle", None)
+            if log_handle:
+                try:
+                    log_handle.close()
+                except Exception:
+                    pass
+            handler.close()
+        except Exception:
+            pass
     logger.handlers.clear()
 
     # Create Rich handler
     if log_file:
-        # When writing to file, use file-aware console
+        # When writing to file, use file-aware console and keep handle for cleanup
+        log_handle = log_file.open("w", encoding="utf-8")
+        console = Console(file=log_handle)
         handler = RichHandler(
-            console=Console(file=open(log_file, "w", encoding="utf-8")),
+            console=console,
             rich_tracebacks=True,
             show_path=False,
         )
+        # Attach handle so we can close it later if setup_logging is re-run
+        handler._log_handle = log_handle  # type: ignore[attr-defined]
     else:
         handler = RichHandler(rich_tracebacks=True, show_path=False)
 
@@ -75,7 +90,7 @@ def _enrich_batch_identifiers(
     batch_df: pd.DataFrame, logger: logging.Logger
 ) -> pd.DataFrame:
     """
-    Enrich a batch DataFrame with building_id, streetview_image_id, and target_coord_hash.
+    Enrich a batch DataFrame with building_id and streetview_image_id.
     
     This is a streaming-friendly version that works on batches.
     """
@@ -126,13 +141,6 @@ def _enrich_batch_identifiers(
     if "streetview_image_id" not in enriched_df.columns:
         enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
     
-    # Add coordinate hash
-    if "target_lat" in enriched_df.columns and "target_lon" in enriched_df.columns:
-        hash_source = enriched_df[["target_lat", "target_lon"]]
-        hash_values = hash_pandas_object(hash_source, index=False, categorize=False)
-        hash_strings = hash_values.map(lambda value: format(int(value), "016x"))
-        enriched_df["target_coord_hash"] = hash_strings.astype("string")
-    
     return enriched_df
 
 
@@ -163,34 +171,6 @@ def ensure_building_identifiers(df: pd.DataFrame) -> pd.DataFrame:
         enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
 
     return enriched_df
-
-
-def add_coordinate_hash(df: pd.DataFrame, logger: logging.Logger) -> pd.DataFrame:
-    """
-    Compute a short hash for each (target_lat, target_lon) pair.
-
-    This enables downstream deduplication by exact coordinate rather than building_id.
-    """
-    required_columns = {"target_lat", "target_lon"}
-    missing = required_columns - set(df.columns)
-    if missing:
-        raise ValueError(
-            f"Missing required coordinate columns for hashing: {', '.join(sorted(missing))}"
-        )
-
-    hash_source = df[["target_lat", "target_lon"]]
-    hash_values = hash_pandas_object(hash_source, index=False, categorize=False)
-    hash_strings = hash_values.map(lambda value: format(int(value), "016x"))
-    df = df.copy()
-    df["target_coord_hash"] = hash_strings.astype("string")
-
-    unique_coords = df["target_coord_hash"].nunique(dropna=False)
-    logger.info(
-        "Computed coordinate hashes for %s rows (%s unique lat/lon pairs)",
-        f"{len(df):,}",
-        f"{unique_coords:,}",
-    )
-    return df
 
 
 def ensure_dataset_id(
@@ -327,71 +307,6 @@ def filter_singleton_buildings(
     return filtered_df
 
 
-def create_splits(
-    df: pd.DataFrame,
-    train_ratio: float,
-    val_ratio: float,
-    test_ratio: float,
-    seed: int,
-    logger: logging.Logger,
-) -> pd.DataFrame:
-    """
-    Assign split labels to entries based on target_coord_hash (spatial split).
-
-    Using target_coord_hash ensures that all buildings at the same location (e.g. same building,
-    different angles/ids) end up in the same split, preventing data leakage.
-    """
-    split_key = "target_coord_hash"
-    if split_key not in df.columns:
-        logger.warning(
-            f"{split_key} not found, falling back to building_id. "
-            "WARNING: This may cause data leakage if multiple building_ids share coordinates."
-        )
-        split_key = "building_id"
-
-    if split_key not in df.columns:
-        raise ValueError(f"Expected '{split_key}' column to create splits.")
-
-    unique_keys = df[split_key].unique()
-    n_keys = len(unique_keys)
-
-    logger.info(f"Splitting {n_keys:,} unique keys ({split_key})")
-    logger.info(
-        f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
-    )
-
-    # Shuffle keys deterministically
-    rng = np.random.default_rng(seed)
-    shuffled_keys = rng.permutation(unique_keys)
-
-    # Calculate split boundaries
-    n_train = int(n_keys * train_ratio)
-    n_val = int(n_keys * val_ratio)
-    # n_test = n_keys - n_train - n_val (to handle rounding)
-
-    train_keys = set(shuffled_keys[:n_train])
-    val_keys = set(shuffled_keys[n_train : n_train + n_val])
-    # test_keys = set(shuffled_keys[n_train + n_val :])
-
-    # Assign split labels
-    df["split"] = df[split_key].map(
-        lambda key: (
-            "train" if key in train_keys else ("val" if key in val_keys else "test")
-        )
-    )
-
-    # Log split statistics
-    split_counts = df["split"].value_counts()
-    logger.info("Split distribution (entries):")
-    for split, count in split_counts.items():
-        logger.info(f"  {split}: {count:,} entries ({count/len(df):.1%})")
-
-    # Convert split to categorical for memory efficiency
-    df["split"] = df["split"].astype("category")
-
-    return df
-
-
 def pass1_compute_metadata(
     dataset: ds.Dataset,
     train_ratio: float,
@@ -402,11 +317,11 @@ def pass1_compute_metadata(
     progress: Progress,
 ) -> tuple[set[str], dict[str, str], int]:
     """
-    Pass 1: Stream identifier/coord columns to compute building counts and split mapping.
+    Pass 1: Stream identifier columns to compute building counts and split mapping.
     
     Returns:
         - singleton_building_ids: Set of building_ids to filter out
-        - coord_hash_to_split: Mapping from target_coord_hash to split name
+        - building_id_to_split: Mapping from building_id to split name
         - total_building_ids: Total number of unique building_ids (before filtering)
     """
     logger.info("Pass 1: Computing building counts and split assignments...")
@@ -416,32 +331,22 @@ def pass1_compute_metadata(
         "dataset_id",
         "target_id",
         "patch_id",
-        "target_lat",
-        "target_lon",
     ]
     
     # Check which columns exist in the dataset
     schema = dataset.schema
     available_columns = set(schema.names)
-    needed_columns = [col for col in identifier_columns if col in available_columns]
-    required_coords = {"target_lat", "target_lon"}
-    missing_coords = required_coords - available_columns
-    if missing_coords:
+    missing_required = set(identifier_columns) - available_columns
+    if missing_required:
         raise ValueError(
-            "Missing required coordinate columns for hashing: "
-            f"{', '.join(sorted(missing_coords))}. "
-            "Ensure embedding parquet outputs include target_lat and target_lon."
+            "Missing required identifier columns for merge_and_split: "
+            f"{', '.join(sorted(missing_required))}. "
+            "Ensure dataset_id, target_id, and patch_id are present in embedding parquet files."
         )
+    needed_columns = identifier_columns
     
-    if not needed_columns:
-        raise ValueError(
-            f"None of the required identifier columns found. "
-            f"Available: {sorted(available_columns)}"
-        )
-    
-    # Stream batches and collect building_id counts and coordinate hashes
+    # Stream batches and collect building_id counts
     building_id_counts: Counter[str] = Counter()
-    coord_hashes: set[str] = set()
     total_rows = 0
     
     task = progress.add_task("Pass 1: Streaming identifiers...", total=None)
@@ -457,10 +362,11 @@ def pass1_compute_metadata(
         # Count building_ids
         if "building_id" in batch_df.columns:
             building_id_counts.update(batch_df["building_id"].tolist())
-        
-        # Collect unique coordinate hashes
-        if "target_coord_hash" in batch_df.columns:
-            coord_hashes.update(batch_df["target_coord_hash"].unique())
+        else:
+            raise ValueError(
+                "building_id not found after enrichment. "
+                "Ensure dataset_id, target_id, and patch_id are present."
+            )
         
         progress.update(task, advance=len(batch_df))
     
@@ -470,49 +376,53 @@ def pass1_compute_metadata(
     }
     total_building_ids = len(building_id_counts)
     
+    # Get unique building_ids (excluding singletons) for split assignment
+    non_singleton_building_ids = {
+        bid for bid in building_id_counts.keys() if bid not in singleton_building_ids
+    }
+    
     logger.info(
         f"Pass 1 complete: {total_rows:,} rows, {total_building_ids:,} unique building_ids, "
-        f"{len(singleton_building_ids):,} singletons, "
-        f"{len(coord_hashes):,} unique coordinate hashes"
+        f"{len(singleton_building_ids):,} singletons"
     )
     
-    # Create deterministic split assignment for coordinate hashes
-    unique_coords_list = sorted(coord_hashes)
-    n_keys = len(unique_coords_list)
+    # Create deterministic split assignment for building_ids
+    unique_building_ids_list = sorted(non_singleton_building_ids)
+    n_keys = len(unique_building_ids_list)
     
-    logger.info(f"Splitting {n_keys:,} unique coordinate hashes")
+    logger.info(f"Splitting {n_keys:,} unique building_ids")
     logger.info(
         f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
     )
     
     # Shuffle keys deterministically
     rng = np.random.default_rng(seed)
-    shuffled_coords = rng.permutation(unique_coords_list)
+    shuffled_building_ids = rng.permutation(unique_building_ids_list)
     
     # Calculate split boundaries
     n_train = int(n_keys * train_ratio)
     n_val = int(n_keys * val_ratio)
     
-    train_keys = set(shuffled_coords[:n_train])
-    val_keys = set(shuffled_coords[n_train : n_train + n_val])
+    train_keys = set(shuffled_building_ids[:n_train])
+    val_keys = set(shuffled_building_ids[n_train : n_train + n_val])
     # test_keys are the remainder
     
     # Create mapping
-    coord_hash_to_split: dict[str, str] = {}
-    for coord_hash in train_keys:
-        coord_hash_to_split[coord_hash] = "train"
-    for coord_hash in val_keys:
-        coord_hash_to_split[coord_hash] = "val"
-    for coord_hash in shuffled_coords[n_train + n_val :]:
-        coord_hash_to_split[coord_hash] = "test"
+    building_id_to_split: dict[str, str] = {}
+    for building_id in train_keys:
+        building_id_to_split[building_id] = "train"
+    for building_id in val_keys:
+        building_id_to_split[building_id] = "val"
+    for building_id in shuffled_building_ids[n_train + n_val :]:
+        building_id_to_split[building_id] = "test"
     
-    return singleton_building_ids, coord_hash_to_split, total_building_ids
+    return singleton_building_ids, building_id_to_split, total_building_ids
 
 
 def pass2_stream_and_write(
     dataset: ds.Dataset,
     singleton_building_ids: set[str],
-    coord_hash_to_split: dict[str, str],
+    building_id_to_split: dict[str, str],
     output_dir: Path,
     batch_size: int,
     logger: logging.Logger,
@@ -580,13 +490,13 @@ def pass2_stream_and_write(
             else:
                 stats["rows_after_filtering"] += len(batch_df)
             
-            # Assign splits based on coordinate hash
-            if "target_coord_hash" in batch_df.columns:
-                batch_df["split"] = batch_df["target_coord_hash"].map(
-                    lambda h: coord_hash_to_split.get(h, "test")
+            # Assign splits based on building_id
+            if "building_id" in batch_df.columns:
+                batch_df["split"] = batch_df["building_id"].map(
+                    lambda bid: building_id_to_split.get(bid, "test")
                 )
             else:
-                logger.warning("target_coord_hash not found, assigning all to test")
+                logger.warning("building_id not found, assigning all to test")
                 batch_df["split"] = "test"
             
             # Drop columns not needed in final files (but keep split for now)
@@ -600,12 +510,17 @@ def pass2_stream_and_write(
                     continue
                 
                 # Drop split column before writing
-                split_batch_final = split_batch.drop(columns=["split"], errors="ignore")
+                split_batch_final = (
+                    split_batch.drop(columns=["split"], errors="ignore")
+                    .reset_index(drop=True)
+                )
                 
                 # Initialize schema and writer if needed
                 if split_schemas[split_name] is None:
-                    # Infer schema from first batch for this split
-                    split_schemas[split_name] = pa.Schema.from_pandas(split_batch_final)
+                    # Infer schema from first batch for this split, without index
+                    split_schemas[split_name] = pa.Schema.from_pandas(
+                        split_batch_final, preserve_index=False
+                    )
                 
                 if split_writers[split_name] is None:
                     output_file = output_dir / f"{split_name}.parquet"
@@ -617,7 +532,9 @@ def pass2_stream_and_write(
                 
                 # Convert to Arrow table and write using the consistent schema
                 split_table = pa.Table.from_pandas(
-                    split_batch_final, preserve_index=False, schema=split_schemas[split_name]
+                    split_batch_final,
+                    preserve_index=False,
+                    schema=split_schemas[split_name],
                 )
                 split_writers[split_name].write_table(split_table)
                 
@@ -662,7 +579,7 @@ def merge_and_split(
     Merge intermediate Parquet files, filter singletons, create splits, and write final files.
     
     Uses a two-pass streaming approach to avoid loading all data into memory:
-    - Pass 1: Stream identifier/coord columns to compute building counts and split mapping
+    - Pass 1: Stream identifier columns to compute building counts and split mapping
     - Pass 2: Stream full data in batches, filter singletons, assign splits, write incrementally
 
     Returns statistics dictionary.
@@ -727,7 +644,7 @@ def merge_and_split(
     ) as progress:
         (
             singleton_building_ids,
-            coord_hash_to_split,
+            building_id_to_split,
             total_building_ids,
         ) = pass1_compute_metadata(
             dataset,
@@ -751,7 +668,7 @@ def merge_and_split(
         pass2_stats = pass2_stream_and_write(
             dataset,
             singleton_building_ids,
-            coord_hash_to_split,
+            building_id_to_split,
             output_dir,
             batch_size,
             logger,
