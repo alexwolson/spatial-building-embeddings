@@ -16,6 +16,7 @@ run with a small batch_size (e.g., 1000) to verify split ratios and output struc
 """
 
 import argparse
+import atexit
 import logging
 import sys
 from collections import Counter
@@ -39,6 +40,25 @@ from rich.progress import (
 from config import MergeAndSplitConfig, load_config_from_file
 
 
+# Global registry to track file handles for proper cleanup
+_log_file_handles: list[tuple[logging.Handler, object]] = []
+
+
+def _cleanup_log_handles() -> None:
+    """Clean up all registered log file handles at exit."""
+    logger = logging.getLogger(__name__)
+    for handler, file_handle in _log_file_handles:
+        try:
+            file_handle.close()
+        except Exception as exc:
+            logger.debug("Failed to close log file handle during cleanup: %s", exc, exc_info=True)
+        try:
+            handler.close()
+        except Exception as exc:
+            logger.debug("Failed to close logging handler during cleanup: %s", exc, exc_info=True)
+    _log_file_handles.clear()
+
+
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
     """Set up logging with Rich handler."""
     logger = logging.getLogger(__name__)
@@ -47,21 +67,23 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
     # Remove and close existing handlers to avoid leaking file descriptors
     for handler in logger.handlers:
         try:
-            # Close underlying file handle if we attached one
-            log_handle = getattr(handler, "_log_handle", None)
-            if log_handle:
-                try:
-                    log_handle.close()
-                except Exception:
-                    pass
+            # Find and close any registered file handle for this handler
+            for i, (reg_handler, file_handle) in enumerate(_log_file_handles):
+                if reg_handler is handler:
+                    try:
+                        file_handle.close()
+                    except Exception as exc:
+                        logger.debug("Failed to close log file handle during logging setup: %s", exc, exc_info=True)
+                    _log_file_handles.pop(i)
+                    break
             handler.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to close logging handler during logging setup: %s", exc, exc_info=True)
     logger.handlers.clear()
 
     # Create Rich handler
     if log_file:
-        # When writing to file, use file-aware console and keep handle for cleanup
+        # When writing to file, use file-aware console and register handle for cleanup
         log_handle = log_file.open("w", encoding="utf-8")
         console = Console(file=log_handle)
         handler = RichHandler(
@@ -69,8 +91,8 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
             rich_tracebacks=True,
             show_path=False,
         )
-        # Attach handle so we can close it later if setup_logging is re-run
-        handler._log_handle = log_handle  # type: ignore[attr-defined]
+        # Register the handle for cleanup at exit
+        _log_file_handles.append((handler, log_handle))
     else:
         handler = RichHandler(rich_tracebacks=True, show_path=False)
 
@@ -78,6 +100,10 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
     logger.addHandler(handler)
 
     return logger
+
+
+# Register cleanup function to run at exit
+atexit.register(_cleanup_log_handles)
 
 
 def discover_intermediate_files(intermediates_dir: Path) -> list[Path]:
