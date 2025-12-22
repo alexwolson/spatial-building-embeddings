@@ -400,7 +400,7 @@ def pass1_compute_metadata(
     seed: int,
     logger: logging.Logger,
     progress: Progress,
-) -> tuple[set[str], dict[str, str], int, int]:
+) -> tuple[set[str], dict[str, str], int]:
     """
     Pass 1: Stream identifier/coord columns to compute building counts and split mapping.
     
@@ -408,7 +408,6 @@ def pass1_compute_metadata(
         - singleton_building_ids: Set of building_ids to filter out
         - coord_hash_to_split: Mapping from target_coord_hash to split name
         - total_building_ids: Total number of unique building_ids (before filtering)
-        - total_rows: Total number of rows processed
     """
     logger.info("Pass 1: Computing building counts and split assignments...")
     
@@ -507,7 +506,7 @@ def pass1_compute_metadata(
     for coord_hash in shuffled_coords[n_train + n_val :]:
         coord_hash_to_split[coord_hash] = "test"
     
-    return singleton_building_ids, coord_hash_to_split, total_building_ids, total_rows
+    return singleton_building_ids, coord_hash_to_split, total_building_ids
 
 
 def pass2_stream_and_write(
@@ -544,6 +543,13 @@ def pass2_stream_and_write(
         "test_entries": 0,
     }
     
+    # Infer schema once before starting batch processing to ensure consistency
+    split_schemas: dict[str, pa.Schema | None] = {
+        "train": None,
+        "val": None,
+        "test": None,
+    }
+    
     task = progress.add_task("Pass 2: Processing batches...", total=None)
     
     try:
@@ -551,7 +557,8 @@ def pass2_stream_and_write(
         scanner = dataset.scanner(batch_size=batch_size)
         for batch in scanner.to_batches():
             batch_df = batch.to_pandas()
-            stats["total_rows_read"] += len(batch_df)
+            rows_in_batch = len(batch_df)
+            stats["total_rows_read"] += rows_in_batch
             
             # Enrich with identifiers
             batch_df = _enrich_batch_identifiers(batch_df, logger)
@@ -560,7 +567,16 @@ def pass2_stream_and_write(
             if "building_id" in batch_df.columns:
                 before_filter = len(batch_df)
                 batch_df = batch_df[~batch_df["building_id"].isin(singleton_building_ids)]
-                stats["rows_after_filtering"] += len(batch_df)
+                after_filter = len(batch_df)
+                filtered_out = before_filter - after_filter
+                stats["rows_after_filtering"] += after_filter
+                if filtered_out > 0:
+                    logger.debug(
+                        "Filtered out %d singleton rows in current batch (before: %d, after: %d)",
+                        filtered_out,
+                        before_filter,
+                        after_filter,
+                    )
             else:
                 stats["rows_after_filtering"] += len(batch_df)
             
@@ -586,24 +602,29 @@ def pass2_stream_and_write(
                 # Drop split column before writing
                 split_batch_final = split_batch.drop(columns=["split"], errors="ignore")
                 
-                # Initialize writer if needed
+                # Initialize schema and writer if needed
+                if split_schemas[split_name] is None:
+                    # Infer schema from first batch for this split
+                    split_schemas[split_name] = pa.Schema.from_pandas(split_batch_final)
+                
                 if split_writers[split_name] is None:
                     output_file = output_dir / f"{split_name}.parquet"
-                    # Get schema from first batch (without split column)
-                    split_schema = pa.Schema.from_pandas(split_batch_final)
                     split_writers[split_name] = pq.ParquetWriter(
                         output_file,
-                        split_schema,
+                        split_schemas[split_name],
                         compression="snappy",
                     )
                 
-                # Convert to Arrow table and write
-                split_table = pa.Table.from_pandas(split_batch_final, preserve_index=False)
+                # Convert to Arrow table and write using the consistent schema
+                split_table = pa.Table.from_pandas(
+                    split_batch_final, preserve_index=False, schema=split_schemas[split_name]
+                )
                 split_writers[split_name].write_table(split_table)
                 
                 stats[f"{split_name}_entries"] += len(split_batch)
             
-            progress.update(task, advance=len(batch_df))
+            # Update progress based on original input rows read
+            progress.update(task, advance=rows_in_batch)
         
         # Close all writers
         for split_name, writer in split_writers.items():
@@ -708,7 +729,6 @@ def merge_and_split(
             singleton_building_ids,
             coord_hash_to_split,
             total_building_ids,
-            pass1_total_rows,
         ) = pass1_compute_metadata(
             dataset,
             train_ratio,
