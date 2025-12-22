@@ -90,6 +90,10 @@ class MergeAndSplitConfig(BaseSettings):
         None, description="Random seed (inherits from global if not set)"
     )
     log_file: Path | None = Field(None, description="Optional log file path")
+    batch_size: PositiveInt = Field(
+        100_000,
+        description="Batch size for streaming processing (rows per batch in pass 2)",
+    )
 
     def model_post_init(self, __context):
         """Validate that ratios sum to 1.0."""
@@ -546,6 +550,8 @@ def load_config_from_file(
     elif config_type == "merge_and_split":
         merged_data.update(data.get("paths", {}))
         merged_data.update(data.get("data", {}))
+        # batch_size can be in [data] section for merge_and_split
+        # (it defaults to 100_000 in MergeAndSplitConfig if not provided)
     elif config_type == "generate_embeddings":
         merged_data.update(data.get("paths", {}))
         merged_data.update(data.get("embedding_model", {}))

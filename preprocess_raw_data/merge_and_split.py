@@ -6,15 +6,26 @@ and write final Parquet files.
 This script reads embedding Parquet files produced after tar preprocessing, removes singleton buildings
 (which cannot form triplets), creates deterministic splits by building, and writes final
 Parquet files for training. Resulting splits include embedding vectors and exclude raw image paths.
+
+Uses a two-pass streaming approach to avoid OOM errors with large datasets:
+- Pass 1: Streams only identifier/coord columns to compute building counts and split mapping
+- Pass 2: Streams full data in configurable batches, filters singletons, assigns splits, writes incrementally
+
+To test with a small sample, create a temporary directory with a subset of embedding files and
+run with a small batch_size (e.g., 1000) to verify split ratios and output structure.
 """
 
 import argparse
 import logging
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
@@ -60,33 +71,69 @@ def discover_intermediate_files(intermediates_dir: Path) -> list[Path]:
     return parquet_files
 
 
-def read_parquet_files(
-    parquet_files: list[Path],
-    logger: logging.Logger,
-    progress: Progress,
+def _enrich_batch_identifiers(
+    batch_df: pd.DataFrame, logger: logging.Logger
 ) -> pd.DataFrame:
-    """Read Parquet files and concatenate."""
-    dfs = []
-    task = progress.add_task("Reading intermediate files...", total=len(parquet_files))
-
-    for parquet_file in parquet_files:
-        try:
-            df = pd.read_parquet(parquet_file, engine="pyarrow")
-            dfs.append(df)
-            logger.debug(f"Read {len(df)} rows from {parquet_file.name}")
-        except Exception as e:
-            logger.error(f"Failed to read {parquet_file}: {e}")
-            continue
-        progress.update(task, advance=1)
-
-    if not dfs:
-        raise ValueError("No valid intermediate files found")
-
-    logger.info(f"Read {len(dfs)} files, concatenating...")
-    # Concatenate all DataFrames
-    combined_df = pd.concat(dfs, ignore_index=True)
-    logger.info(f"Total rows after concatenation: {len(combined_df):,}")
-    return combined_df
+    """
+    Enrich a batch DataFrame with building_id, streetview_image_id, and target_coord_hash.
+    
+    This is a streaming-friendly version that works on batches.
+    """
+    # Ensure dataset_id exists (simplified version for batches)
+    if "dataset_id" not in batch_df.columns:
+        # Try to infer from other columns
+        if "building_id" in batch_df.columns:
+            prefixes = batch_df["building_id"].astype(str).str.split("_", n=1).str[0]
+            inferred = pd.to_numeric(prefixes, errors="coerce")
+        elif "tar_file" in batch_df.columns:
+            stems = batch_df["tar_file"].astype(str).str.removesuffix(".tar")
+            inferred = pd.to_numeric(stems, errors="coerce")
+        else:
+            raise ValueError("Cannot infer dataset_id from batch")
+        if inferred.isna().any():
+            sample = inferred[inferred.isna()].head(3).to_list()
+            raise ValueError(
+                f"Failed to infer dataset_id for batch rows (examples: {sample}). "
+                "Ensure dataset_id is present or inferable."
+            )
+        batch_df["dataset_id"] = inferred.astype("Int64")
+    else:
+        # Validate existing dataset_id has no NA after coercion
+        coerced = pd.to_numeric(batch_df["dataset_id"], errors="coerce")
+        if coerced.isna().any():
+            sample = coerced[coerced.isna()].head(3).to_list()
+            raise ValueError(
+                f"dataset_id contains non-numeric/NA values (examples: {sample})."
+            )
+        batch_df["dataset_id"] = coerced.astype("Int64")
+    
+    # Ensure building_id and streetview_image_id
+    required_columns = {"dataset_id", "target_id", "patch_id"}
+    missing = required_columns - set(batch_df.columns)
+    if missing:
+        raise ValueError(
+            f"Missing required columns for composite identifiers: {', '.join(sorted(missing))}"
+        )
+    
+    enriched_df = batch_df.copy()
+    
+    dataset_str = enriched_df["dataset_id"].astype("Int64").astype(str).str.zfill(4)
+    target_str = enriched_df["target_id"].astype(int).astype(str)
+    patch_str = enriched_df["patch_id"].astype(int).astype(str)
+    
+    if "building_id" not in enriched_df.columns:
+        enriched_df["building_id"] = dataset_str + "_" + target_str
+    if "streetview_image_id" not in enriched_df.columns:
+        enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
+    
+    # Add coordinate hash
+    if "target_lat" in enriched_df.columns and "target_lon" in enriched_df.columns:
+        hash_source = enriched_df[["target_lat", "target_lon"]]
+        hash_values = hash_pandas_object(hash_source, index=False, categorize=False)
+        hash_strings = hash_values.map(lambda value: format(int(value), "016x"))
+        enriched_df["target_coord_hash"] = hash_strings.astype("string")
+    
+    return enriched_df
 
 
 def ensure_building_identifiers(df: pd.DataFrame) -> pd.DataFrame:
@@ -345,46 +392,238 @@ def create_splits(
     return df
 
 
-def write_final_files(
-    df: pd.DataFrame,
-    output_dir: Path,
+def pass1_compute_metadata(
+    dataset: ds.Dataset,
+    train_ratio: float,
+    val_ratio: float,
+    test_ratio: float,
+    seed: int,
     logger: logging.Logger,
     progress: Progress,
-) -> None:
-    """Write final Parquet files, one per split."""
+) -> tuple[set[str], dict[str, str], int, int]:
+    """
+    Pass 1: Stream identifier/coord columns to compute building counts and split mapping.
+    
+    Returns:
+        - singleton_building_ids: Set of building_ids to filter out
+        - coord_hash_to_split: Mapping from target_coord_hash to split name
+        - total_building_ids: Total number of unique building_ids (before filtering)
+        - total_rows: Total number of rows processed
+    """
+    logger.info("Pass 1: Computing building counts and split assignments...")
+    
+    # Columns needed for pass 1 (excluding embedding to save memory)
+    identifier_columns = [
+        "dataset_id",
+        "target_id",
+        "patch_id",
+        "target_lat",
+        "target_lon",
+    ]
+    
+    # Check which columns exist in the dataset
+    schema = dataset.schema
+    available_columns = set(schema.names)
+    needed_columns = [col for col in identifier_columns if col in available_columns]
+    required_coords = {"target_lat", "target_lon"}
+    missing_coords = required_coords - available_columns
+    if missing_coords:
+        raise ValueError(
+            "Missing required coordinate columns for hashing: "
+            f"{', '.join(sorted(missing_coords))}. "
+            "Ensure embedding parquet outputs include target_lat and target_lon."
+        )
+    
+    if not needed_columns:
+        raise ValueError(
+            f"None of the required identifier columns found. "
+            f"Available: {sorted(available_columns)}"
+        )
+    
+    # Stream batches and collect building_id counts and coordinate hashes
+    building_id_counts: Counter[str] = Counter()
+    coord_hashes: set[str] = set()
+    total_rows = 0
+    
+    task = progress.add_task("Pass 1: Streaming identifiers...", total=None)
+    
+    scanner = dataset.scanner(columns=needed_columns)
+    for batch in scanner.to_batches():
+        batch_df = batch.to_pandas()
+        total_rows += len(batch_df)
+        
+        # Enrich with identifiers
+        batch_df = _enrich_batch_identifiers(batch_df, logger)
+        
+        # Count building_ids
+        if "building_id" in batch_df.columns:
+            building_id_counts.update(batch_df["building_id"].tolist())
+        
+        # Collect unique coordinate hashes
+        if "target_coord_hash" in batch_df.columns:
+            coord_hashes.update(batch_df["target_coord_hash"].unique())
+        
+        progress.update(task, advance=len(batch_df))
+    
+    # Identify singleton building_ids
+    singleton_building_ids = {
+        bid for bid, count in building_id_counts.items() if count == 1
+    }
+    total_building_ids = len(building_id_counts)
+    
+    logger.info(
+        f"Pass 1 complete: {total_rows:,} rows, {total_building_ids:,} unique building_ids, "
+        f"{len(singleton_building_ids):,} singletons, "
+        f"{len(coord_hashes):,} unique coordinate hashes"
+    )
+    
+    # Create deterministic split assignment for coordinate hashes
+    unique_coords_list = sorted(coord_hashes)
+    n_keys = len(unique_coords_list)
+    
+    logger.info(f"Splitting {n_keys:,} unique coordinate hashes")
+    logger.info(
+        f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
+    )
+    
+    # Shuffle keys deterministically
+    rng = np.random.default_rng(seed)
+    shuffled_coords = rng.permutation(unique_coords_list)
+    
+    # Calculate split boundaries
+    n_train = int(n_keys * train_ratio)
+    n_val = int(n_keys * val_ratio)
+    
+    train_keys = set(shuffled_coords[:n_train])
+    val_keys = set(shuffled_coords[n_train : n_train + n_val])
+    # test_keys are the remainder
+    
+    # Create mapping
+    coord_hash_to_split: dict[str, str] = {}
+    for coord_hash in train_keys:
+        coord_hash_to_split[coord_hash] = "train"
+    for coord_hash in val_keys:
+        coord_hash_to_split[coord_hash] = "val"
+    for coord_hash in shuffled_coords[n_train + n_val :]:
+        coord_hash_to_split[coord_hash] = "test"
+    
+    return singleton_building_ids, coord_hash_to_split, total_building_ids, total_rows
+
+
+def pass2_stream_and_write(
+    dataset: ds.Dataset,
+    singleton_building_ids: set[str],
+    coord_hash_to_split: dict[str, str],
+    output_dir: Path,
+    batch_size: int,
+    logger: logging.Logger,
+    progress: Progress,
+) -> dict[str, int]:
+    """
+    Pass 2: Stream full data in batches, filter singletons, assign splits, write incrementally.
+    
+    Returns statistics dictionary.
+    """
+    logger.info("Pass 2: Streaming full data and writing splits...")
+    
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    for split in ["train", "val", "test"]:
-        split_df = df[df["split"] == split].copy()
-
-        if len(split_df) == 0:
-            logger.warning(f"No entries for {split} split, skipping")
-            continue
-
-        logger.info(f"Writing {split} split: {len(split_df):,} entries")
-
-        # Drop split and tar_file columns (not needed in final files)
-        split_df = split_df.drop(
-            columns=["split", "tar_file", "image_path"], errors="ignore"
-        )
-
-        # Write final file
-        final_file = output_dir / f"{split}.parquet"
-        task = progress.add_task(f"Writing {split}...", total=1)
-
-        split_df.to_parquet(
-            final_file,
-            engine="pyarrow",
-            compression="snappy",
-            index=False,
-        )
-
-        progress.update(task, advance=1)
-
-        file_size_mb = final_file.stat().st_size / (1024 * 1024)
-        logger.info(
-            f"Wrote {final_file.name}: {len(split_df):,} entries, {file_size_mb:.1f} MB"
-        )
+    
+    # Initialize Parquet writers for each split
+    split_writers: dict[str, pq.ParquetWriter | None] = {
+        "train": None,
+        "val": None,
+        "test": None,
+    }
+    
+    # Track statistics
+    stats = {
+        "total_rows_read": 0,
+        "rows_after_filtering": 0,
+        "train_entries": 0,
+        "val_entries": 0,
+        "test_entries": 0,
+    }
+    
+    task = progress.add_task("Pass 2: Processing batches...", total=None)
+    
+    try:
+        # Stream batches
+        scanner = dataset.scanner(batch_size=batch_size)
+        for batch in scanner.to_batches():
+            batch_df = batch.to_pandas()
+            stats["total_rows_read"] += len(batch_df)
+            
+            # Enrich with identifiers
+            batch_df = _enrich_batch_identifiers(batch_df, logger)
+            
+            # Filter singleton buildings
+            if "building_id" in batch_df.columns:
+                before_filter = len(batch_df)
+                batch_df = batch_df[~batch_df["building_id"].isin(singleton_building_ids)]
+                stats["rows_after_filtering"] += len(batch_df)
+            else:
+                stats["rows_after_filtering"] += len(batch_df)
+            
+            # Assign splits based on coordinate hash
+            if "target_coord_hash" in batch_df.columns:
+                batch_df["split"] = batch_df["target_coord_hash"].map(
+                    lambda h: coord_hash_to_split.get(h, "test")
+                )
+            else:
+                logger.warning("target_coord_hash not found, assigning all to test")
+                batch_df["split"] = "test"
+            
+            # Drop columns not needed in final files (but keep split for now)
+            columns_to_drop = ["tar_file", "image_path"]
+            batch_df_clean = batch_df.drop(columns=[c for c in columns_to_drop if c in batch_df.columns])
+            
+            # Write to appropriate split files
+            for split_name in ["train", "val", "test"]:
+                split_batch = batch_df_clean[batch_df_clean["split"] == split_name]
+                if len(split_batch) == 0:
+                    continue
+                
+                # Drop split column before writing
+                split_batch_final = split_batch.drop(columns=["split"], errors="ignore")
+                
+                # Initialize writer if needed
+                if split_writers[split_name] is None:
+                    output_file = output_dir / f"{split_name}.parquet"
+                    # Get schema from first batch (without split column)
+                    split_schema = pa.Schema.from_pandas(split_batch_final)
+                    split_writers[split_name] = pq.ParquetWriter(
+                        output_file,
+                        split_schema,
+                        compression="snappy",
+                    )
+                
+                # Convert to Arrow table and write
+                split_table = pa.Table.from_pandas(split_batch_final, preserve_index=False)
+                split_writers[split_name].write_table(split_table)
+                
+                stats[f"{split_name}_entries"] += len(split_batch)
+            
+            progress.update(task, advance=len(batch_df))
+        
+        # Close all writers
+        for split_name, writer in split_writers.items():
+            if writer is not None:
+                writer.close()
+                output_file = output_dir / f"{split_name}.parquet"
+                file_size_mb = output_file.stat().st_size / (1024 * 1024)
+                logger.info(
+                    f"Wrote {split_name}.parquet: {stats[f'{split_name}_entries']:,} entries, "
+                    f"{file_size_mb:.1f} MB"
+                )
+    
+    except Exception:
+        # Close writers on error
+        for writer in split_writers.values():
+            if writer is not None:
+                writer.close()
+        raise
+    
+    return stats
 
 
 def merge_and_split(
@@ -395,17 +634,23 @@ def merge_and_split(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     seed: int = 42,
+    batch_size: int = 100_000,
     log_file: Path | None = None,
 ) -> dict[str, int]:
     """
     Merge intermediate Parquet files, filter singletons, create splits, and write final files.
+    
+    Uses a two-pass streaming approach to avoid loading all data into memory:
+    - Pass 1: Stream identifier/coord columns to compute building counts and split mapping
+    - Pass 2: Stream full data in batches, filter singletons, assign splits, write incrementally
 
     Returns statistics dictionary.
     """
     logger = setup_logging(log_file)
     logger.info("=" * 60)
-    logger.info("Dataset assembly: merge and split intermediates")
+    logger.info("Dataset assembly: merge and split intermediates (streaming mode)")
     logger.info("=" * 60)
+    logger.info(f"Batch size: {batch_size:,} rows")
 
     # Discover intermediate files
     logger.info(f"Discovering intermediate files in: {intermediates_dir}")
@@ -435,38 +680,23 @@ def merge_and_split(
             ", ".join(missing_embeddings[:3]),
         )
 
-    # Read embedding files
-    logger.info("Reading embedding files...")
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        refresh_per_second=1,
-    ) as progress:
-        df = read_parquet_files(embedding_files, logger, progress)
-
-    if "embedding" not in df.columns:
+    # Create PyArrow dataset from embedding files
+    logger.info("Creating PyArrow dataset from embedding files...")
+    dataset = ds.dataset(
+        embedding_files,
+        format="parquet",
+        schema=None,  # Auto-detect schema
+    )
+    
+    # Verify embedding column exists
+    schema = dataset.schema
+    if "embedding" not in schema.names:
         raise ValueError(
-            "Embedding column not found in combined dataframe. "
+            "Embedding column not found in dataset. "
             "Ensure generate_embeddings.py outputs include an 'embedding' column."
         )
 
-    # Ensure dataset identifiers exist before composing building-aware identifiers
-    df = ensure_dataset_id(df, logger)
-    df = ensure_building_identifiers(df)
-    df = add_coordinate_hash(df, logger)
-
-    # Filter singleton targets
-    logger.info("Filtering singleton building_ids...")
-    df = filter_singleton_buildings(df, logger)
-
-    # Create splits
-    logger.info("Creating train/val/test splits...")
-    df = create_splits(df, train_ratio, val_ratio, test_ratio, seed, logger)
-
-    # Write final files
-    logger.info("Writing final Parquet files...")
+    # Pass 1: Compute building counts and split mapping
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -474,17 +704,51 @@ def merge_and_split(
         TaskProgressColumn(),
         refresh_per_second=1,
     ) as progress:
-        write_final_files(df, output_dir, logger, progress)
+        (
+            singleton_building_ids,
+            coord_hash_to_split,
+            total_building_ids,
+            pass1_total_rows,
+        ) = pass1_compute_metadata(
+            dataset,
+            train_ratio,
+            val_ratio,
+            test_ratio,
+            seed,
+            logger,
+            progress,
+        )
 
-    # Calculate statistics
+    # Pass 2: Stream full data and write splits
+    logger.info("Pass 2: Streaming full data and writing splits...")
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        refresh_per_second=1,
+    ) as progress:
+        pass2_stats = pass2_stream_and_write(
+            dataset,
+            singleton_building_ids,
+            coord_hash_to_split,
+            output_dir,
+            batch_size,
+            logger,
+            progress,
+        )
+
+    # Calculate final statistics
+    unique_building_ids_after_filter = total_building_ids - len(singleton_building_ids)
     stats = {
         "total_intermediate_files": len(intermediate_files),
         "total_embedding_files": len(embedding_files),
-        "total_rows_read": len(df),
-        "unique_building_ids": df["building_id"].nunique(),
-        "train_entries": len(df[df["split"] == "train"]),
-        "val_entries": len(df[df["split"] == "val"]),
-        "test_entries": len(df[df["split"] == "test"]),
+        "total_rows_read": pass2_stats["total_rows_read"],
+        "rows_after_filtering": pass2_stats["rows_after_filtering"],
+        "unique_building_ids": unique_building_ids_after_filter,
+        "train_entries": pass2_stats["train_entries"],
+        "val_entries": pass2_stats["val_entries"],
+        "test_entries": pass2_stats["test_entries"],
     }
 
     logger.info("=" * 60)
@@ -493,8 +757,9 @@ def merge_and_split(
     logger.info(
         f"Total intermediate files processed: {stats['total_intermediate_files']}"
     )
-    logger.info(f"Total entries in final dataset: {stats['total_rows_read']:,}")
-    logger.info(f"Unique building_ids: {stats['unique_building_ids']:,}")
+    logger.info(f"Total embedding files processed: {stats['total_embedding_files']}")
+    logger.info(f"Total rows read: {stats['total_rows_read']:,}")
+    logger.info(f"Rows after filtering singletons: {stats['rows_after_filtering']:,}")
     logger.info(f"Train entries: {stats['train_entries']:,}")
     logger.info(f"Val entries: {stats['val_entries']:,}")
     logger.info(f"Test entries: {stats['test_entries']:,}")
@@ -551,7 +816,8 @@ def main() -> int:
             train_ratio=config.train_ratio,
             val_ratio=config.val_ratio,
             test_ratio=config.test_ratio,
-            seed=config.seed,
+            seed=config.seed if config.seed is not None else 42,
+            batch_size=config.batch_size,
             log_file=config.log_file,
         )
 
@@ -574,4 +840,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Example: To test with a small sample, create a test directory with a few embedding files
+    # and run: python merge_and_split.py --config config.toml
+    # Verify output split ratios match config ratios and check output parquet file sizes.
     sys.exit(main())

@@ -77,6 +77,10 @@ train_ratio = 0.7
 val_ratio = 0.15
 test_ratio = 0.15
 
+# Streaming batch size for merge_and_split (rows per batch in pass 2)
+# Lower values use less memory but may be slower
+# batch_size = 100000  # Default: 100,000 rows per batch
+
 # Difficulty metadata parameters
 neighbors = 150                    # Number of neighbours to retain per anchor
 k0_for_local_scale = 50           # Neighbour rank used to define the local scale L(a)
