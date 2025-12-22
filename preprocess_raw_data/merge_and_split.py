@@ -760,6 +760,9 @@ def merge_and_split(
     logger.info(f"Total embedding files processed: {stats['total_embedding_files']}")
     logger.info(f"Total rows read: {stats['total_rows_read']:,}")
     logger.info(f"Rows after filtering singletons: {stats['rows_after_filtering']:,}")
+    logger.info(
+        f"Unique building IDs (after filtering singletons): {stats['unique_building_ids']:,}"
+    )
     logger.info(f"Train entries: {stats['train_entries']:,}")
     logger.info(f"Val entries: {stats['val_entries']:,}")
     logger.info(f"Test entries: {stats['test_entries']:,}")
