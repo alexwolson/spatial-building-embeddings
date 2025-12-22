@@ -79,7 +79,7 @@ test_ratio = 0.15
 
 # Streaming batch size for merge_and_split (rows per batch in pass 2)
 # Lower values use less memory but may be slower
-# Note: This batch_size is for merge_and_split streaming, distinct from infrastructure.batch_size (line 96) used for difficulty_metadata
+# Note: This batch_size is for merge_and_split streaming, distinct from infrastructure.batch_size in [infrastructure] section used for difficulty_metadata
 # batch_size = 100000  # Default: 100,000 rows per batch
 
 # Difficulty metadata parameters
