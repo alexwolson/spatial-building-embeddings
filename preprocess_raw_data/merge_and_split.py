@@ -46,16 +46,17 @@ _log_file_handles: list[tuple[logging.Handler, object]] = []
 
 def _cleanup_log_handles() -> None:
     """Clean up all registered log file handles at exit."""
-    logger = logging.getLogger(__name__)
     for handler, file_handle in _log_file_handles:
         try:
             file_handle.close()
         except Exception as exc:
-            logger.debug("Failed to close log file handle during cleanup: %s", exc, exc_info=True)
+            # Use stderr since logging may be shutdown during exit
+            sys.stderr.write(f"Failed to close log file handle during cleanup: {exc}\n")
         try:
             handler.close()
         except Exception as exc:
-            logger.debug("Failed to close logging handler during cleanup: %s", exc, exc_info=True)
+            # Use stderr since logging may be shutdown during exit
+            sys.stderr.write(f"Failed to close logging handler during cleanup: {exc}\n")
     _log_file_handles.clear()
 
 
@@ -68,14 +69,20 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
     for handler in logger.handlers:
         try:
             # Find and close any registered file handle for this handler
+            # Build list of indices to remove (iterate backwards to avoid index issues)
+            indices_to_remove = []
             for i, (reg_handler, file_handle) in enumerate(_log_file_handles):
                 if reg_handler is handler:
                     try:
                         file_handle.close()
                     except Exception as exc:
                         logger.debug("Failed to close log file handle during logging setup: %s", exc, exc_info=True)
-                    _log_file_handles.pop(i)
-                    break
+                    indices_to_remove.append(i)
+            
+            # Remove in reverse order to maintain valid indices
+            for i in reversed(indices_to_remove):
+                _log_file_handles.pop(i)
+            
             handler.close()
         except Exception as exc:
             logger.debug("Failed to close logging handler during logging setup: %s", exc, exc_info=True)
