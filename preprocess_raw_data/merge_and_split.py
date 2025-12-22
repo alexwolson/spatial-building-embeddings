@@ -45,19 +45,37 @@ from config import MergeAndSplitConfig, load_config_from_file
 _log_file_handles: list[tuple[logging.Handler, typing.TextIO]] = []
 
 
+def _close_file_handle(file_handle: typing.TextIO, during_exit: bool = False) -> None:
+    """Close a file handle and report any errors appropriately."""
+    try:
+        file_handle.close()
+    except Exception as exc:
+        if during_exit:
+            # Use stderr since logging may be shutdown during exit
+            sys.stderr.write(f"Failed to close log file handle: {exc}\n")
+        else:
+            logger = logging.getLogger(__name__)
+            logger.debug("Failed to close log file handle: %s", exc, exc_info=True)
+
+
+def _close_handler(handler: logging.Handler, during_exit: bool = False) -> None:
+    """Close a logging handler and report any errors appropriately."""
+    try:
+        handler.close()
+    except Exception as exc:
+        if during_exit:
+            # Use stderr since logging may be shutdown during exit
+            sys.stderr.write(f"Failed to close logging handler: {exc}\n")
+        else:
+            logger = logging.getLogger(__name__)
+            logger.debug("Failed to close logging handler: %s", exc, exc_info=True)
+
+
 def _cleanup_log_handles() -> None:
     """Clean up all registered log file handles at exit."""
     for handler, file_handle in _log_file_handles:
-        try:
-            file_handle.close()
-        except Exception as exc:
-            # Use stderr since logging may be shutdown during exit
-            sys.stderr.write(f"Failed to close log file handle during cleanup: {exc}\n")
-        try:
-            handler.close()
-        except Exception as exc:
-            # Use stderr since logging may be shutdown during exit
-            sys.stderr.write(f"Failed to close logging handler during cleanup: {exc}\n")
+        _close_file_handle(file_handle, during_exit=True)
+        _close_handler(handler, during_exit=True)
     _log_file_handles.clear()
 
 
@@ -68,21 +86,17 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
 
     # Remove and close existing handlers to avoid leaking file descriptors
     for handler in logger.handlers:
-        try:
-            # Close all file handles associated with this handler
-            for reg_handler, file_handle in _log_file_handles:
-                if reg_handler is handler:
-                    try:
-                        file_handle.close()
-                    except Exception as exc:
-                        logger.debug("Failed to close log file handle during logging setup: %s", exc, exc_info=True)
-            
-            # Remove all entries for this handler from the registry
-            _log_file_handles[:] = [(h, f) for h, f in _log_file_handles if h is not handler]
-            
-            handler.close()
-        except Exception as exc:
-            logger.debug("Failed to close logging handler during logging setup: %s", exc, exc_info=True)
+        # Close all file handles associated with this handler
+        for reg_handler, file_handle in _log_file_handles:
+            if reg_handler is handler:
+                _close_file_handle(file_handle, during_exit=False)
+        
+        # Remove all entries for this handler from the registry
+        _log_file_handles[:] = [(h, f) for h, f in _log_file_handles if h is not handler]
+        
+        # Close the handler itself
+        _close_handler(handler, during_exit=False)
+    
     logger.handlers.clear()
 
     # Create Rich handler
