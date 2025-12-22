@@ -19,6 +19,7 @@ import argparse
 import atexit
 import logging
 import sys
+import typing
 from collections import Counter
 from pathlib import Path
 
@@ -41,7 +42,7 @@ from config import MergeAndSplitConfig, load_config_from_file
 
 
 # Global registry to track file handles for proper cleanup
-_log_file_handles: list[tuple[logging.Handler, object]] = []
+_log_file_handles: list[tuple[logging.Handler, typing.TextIO]] = []
 
 
 def _cleanup_log_handles() -> None:
@@ -68,20 +69,16 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
     # Remove and close existing handlers to avoid leaking file descriptors
     for handler in logger.handlers:
         try:
-            # Find and close any registered file handle for this handler
-            # Build list of indices to remove (iterate backwards to avoid index issues)
-            indices_to_remove = []
-            for i, (reg_handler, file_handle) in enumerate(_log_file_handles):
+            # Close all file handles associated with this handler
+            for reg_handler, file_handle in _log_file_handles:
                 if reg_handler is handler:
                     try:
                         file_handle.close()
                     except Exception as exc:
                         logger.debug("Failed to close log file handle during logging setup: %s", exc, exc_info=True)
-                    indices_to_remove.append(i)
             
-            # Remove in reverse order to maintain valid indices
-            for i in reversed(indices_to_remove):
-                _log_file_handles.pop(i)
+            # Remove all entries for this handler from the registry
+            _log_file_handles[:] = [(h, f) for h, f in _log_file_handles if h is not handler]
             
             handler.close()
         except Exception as exc:
