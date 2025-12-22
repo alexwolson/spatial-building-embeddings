@@ -26,12 +26,12 @@ log_dir = "/home/awolson/scratch/spatial-building-embeddings/logs"
 # Pipeline directory paths (shared across workflows)
 intermediates_dir = "/home/awolson/scratch/spatial-building-embeddings/intermediates"      # Output of process_tar, input to merge_and_split
 embeddings_dir = "/home/awolson/scratch/spatial-building-embeddings/embeddings-dinov3"            # Output of generate_embeddings, input to merge_and_split
-merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged"                    # Output of merge_and_split, input to triplet_training
+merged_dir = "/home/awolson/scratch/spatial-building-embeddings/merged-dinov3"                    # Output of merge_and_split, input to triplet_training
 fingerprints_dir = "/home/awolson/scratch/spatial-building-embeddings/fingerprints"          # Output of compute_fingerprints
 
 # Training data paths
-train_parquet_path = "/home/awolson/scratch/spatial-building-embeddings/merged/train.parquet"
-val_parquet_path = "/home/awolson/scratch/spatial-building-embeddings/merged/val.parquet"
+train_parquet_path = "/home/awolson/scratch/spatial-building-embeddings/merged-dinov3/train.parquet"
+val_parquet_path = "/home/awolson/scratch/spatial-building-embeddings/merged-dinov3/val.parquet"
 difficulty_metadata_path = "/home/awolson/scratch/spatial-building-embeddings/difficulty/difficulty_metadata.parquet"  # Output of difficulty_metadata, input to triplet_training
 
 # Training output paths
