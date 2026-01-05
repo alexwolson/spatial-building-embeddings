@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.dataset as ds
 import numpy as np
@@ -132,7 +133,6 @@ def _chunked_take(scanner: ds.Scanner, indices: list[int], chunk_size: int = 200
     Returns:
         Concatenated Arrow table with all selected rows
     """
-    import pyarrow as pa
     
     if len(indices) == 0:
         # Return empty table with same schema
