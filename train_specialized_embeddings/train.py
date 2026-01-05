@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
+import pyarrow.dataset as ds
 import numpy as np
 import pandas as pd
 import torch
@@ -217,6 +218,9 @@ def load_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load training, validation, and difficulty metadata dataframes."""
     logger.info("Loading data files...")
+    
+    # Log memory at the very start
+    log_memory_usage(logger, "start_of_load_data")
 
     # Define required columns for train/val (with fallbacks for streetview_image_id)
     # Try to read streetview_image_id first, but allow fallback to dataset_id/patch_id or target_coord_hash
@@ -230,6 +234,9 @@ def load_data(
     train_schema = pq.ParquetFile(train_path).schema_arrow
     available_cols = set(train_schema.names)
     
+    # Log memory after reading schema but before loading data
+    log_memory_usage(logger, "after_train_schema_read")
+    
     # Required columns
     train_cols = ["building_id", "embedding"]
     # Optional columns for streetview_image_id (prefer streetview_image_id, fallback to components)
@@ -240,27 +247,48 @@ def load_data(
     elif "target_coord_hash" in available_cols:
         train_cols.append("target_coord_hash")
     
-    train_df = pd.read_parquet(train_path, columns=train_cols, engine="pyarrow")
+    # Check if sampling is configured - if so, use PyArrow dataset API to sample during read
+    needs_sampling = (
+        (config.sample_rows is not None and config.sample_rows > 0)
+        or (config.sample_fraction is not None and config.sample_fraction < 1.0)
+    )
     
-    # Apply sampling if configured (sample_rows takes precedence over sample_fraction)
-    if config.sample_rows is not None and config.sample_rows > 0:
-        sample_size = min(config.sample_rows, len(train_df))
-        train_df = train_df.sample(
-            n=sample_size, random_state=config.seed or 42
-        ).reset_index(drop=True)
-        logger.info(
-            f"Sampled {len(train_df):,} training samples (requested {config.sample_rows:,})"
-        )
-    elif config.sample_fraction is not None and config.sample_fraction < 1.0:
-        original_len = len(train_df)
-        train_df = train_df.sample(
-            frac=config.sample_fraction, random_state=config.seed or 42
-        ).reset_index(drop=True)
-        logger.info(
-            f"Sampled {len(train_df):,} training samples ({config.sample_fraction*100:.1f}% of {original_len:,})"
-        )
-    
-    logger.info(f"Loaded {len(train_df):,} training samples")
+    if needs_sampling:
+        # Use PyArrow dataset API to sample during read (avoids loading full file into memory)
+        logger.info("Using PyArrow dataset API for memory-efficient sampling...")
+        dataset = ds.dataset(train_path, format="parquet")
+        
+        # Get total row count first (this is metadata-only, doesn't load data)
+        total_rows = dataset.count_rows()
+        logger.info(f"Total rows in parquet file: {total_rows:,}")
+        
+        # Determine sample size
+        if config.sample_rows is not None and config.sample_rows > 0:
+            sample_size = min(config.sample_rows, total_rows)
+            logger.info(f"Sampling {sample_size:,} rows (requested {config.sample_rows:,})")
+        else:
+            sample_size = int(total_rows * config.sample_fraction)
+            logger.info(
+                f"Sampling {sample_size:,} rows ({config.sample_fraction*100:.1f}% of {total_rows:,})"
+            )
+        
+        # Random sampling: select random row indices, then use take() to get only those rows
+        rng = np.random.RandomState(config.seed or 42)
+        selected_indices = rng.choice(total_rows, size=sample_size, replace=False)
+        selected_indices = np.sort(selected_indices)  # Sort for efficient reading
+        
+        logger.info(f"Selected {len(selected_indices):,} random row indices")
+        
+        # Convert to Arrow table with selected rows using take()
+        scanner = dataset.scanner(columns=train_cols)
+        table = scanner.take(selected_indices.tolist())
+        train_df = table.to_pandas()
+        
+        logger.info(f"Loaded {len(train_df):,} training samples (sampled during read)")
+    else:
+        # No sampling configured - use standard approach
+        train_df = pd.read_parquet(train_path, columns=train_cols, engine="pyarrow")
+        logger.info(f"Loaded {len(train_df):,} training samples (full dataset)")
 
     # Load validation data
     val_path = _validate_parquet_path(config.val_parquet_path, "val", logger)
@@ -277,27 +305,48 @@ def load_data(
     elif "target_coord_hash" in available_cols:
         val_cols.append("target_coord_hash")
     
-    val_df = pd.read_parquet(val_path, columns=val_cols, engine="pyarrow")
+    # Check if validation sampling is configured
+    needs_val_sampling = (
+        (config.val_sample_rows is not None and config.val_sample_rows > 0)
+        or (config.val_sample_fraction is not None and config.val_sample_fraction < 1.0)
+    )
     
-    # Apply sampling to validation if configured (val_sample_rows takes precedence over val_sample_fraction)
-    if config.val_sample_rows is not None and config.val_sample_rows > 0:
-        sample_size = min(config.val_sample_rows, len(val_df))
-        val_df = val_df.sample(
-            n=sample_size, random_state=config.seed or 42
-        ).reset_index(drop=True)
-        logger.info(
-            f"Sampled {len(val_df):,} validation samples (requested {config.val_sample_rows:,})"
-        )
-    elif config.val_sample_fraction is not None and config.val_sample_fraction < 1.0:
-        original_len = len(val_df)
-        val_df = val_df.sample(
-            frac=config.val_sample_fraction, random_state=config.seed or 42
-        ).reset_index(drop=True)
-        logger.info(
-            f"Sampled {len(val_df):,} validation samples ({config.val_sample_fraction*100:.1f}% of {original_len:,})"
-        )
-    
-    logger.info(f"Loaded {len(val_df):,} validation samples")
+    if needs_val_sampling:
+        # Use PyArrow dataset API to sample during read
+        logger.info("Using PyArrow dataset API for memory-efficient validation sampling...")
+        val_dataset = ds.dataset(val_path, format="parquet")
+        
+        # Get total row count first
+        total_val_rows = val_dataset.count_rows()
+        logger.info(f"Total rows in validation parquet file: {total_val_rows:,}")
+        
+        # Determine sample size
+        if config.val_sample_rows is not None and config.val_sample_rows > 0:
+            val_sample_size = min(config.val_sample_rows, total_val_rows)
+            logger.info(f"Sampling {val_sample_size:,} validation rows (requested {config.val_sample_rows:,})")
+        else:
+            val_sample_size = int(total_val_rows * config.val_sample_fraction)
+            logger.info(
+                f"Sampling {val_sample_size:,} validation rows ({config.val_sample_fraction*100:.1f}% of {total_val_rows:,})"
+            )
+        
+        # Random sampling for validation
+        rng = np.random.RandomState(config.seed or 42)
+        selected_val_indices = rng.choice(total_val_rows, size=val_sample_size, replace=False)
+        selected_val_indices = np.sort(selected_val_indices)
+        
+        logger.info(f"Selected {len(selected_val_indices):,} random validation row indices")
+        
+        # Get selected rows
+        val_scanner = val_dataset.scanner(columns=val_cols)
+        val_table = val_scanner.take(selected_val_indices.tolist())
+        val_df = val_table.to_pandas()
+        
+        logger.info(f"Loaded {len(val_df):,} validation samples (sampled during read)")
+    else:
+        # No sampling configured - use standard approach
+        val_df = pd.read_parquet(val_path, columns=val_cols, engine="pyarrow")
+        logger.info(f"Loaded {len(val_df):,} validation samples (full dataset)")
 
     # Load difficulty metadata
     difficulty_path = _validate_parquet_path(
