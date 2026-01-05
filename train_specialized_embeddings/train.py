@@ -25,6 +25,13 @@ import torch.nn as nn
 from rich.logging import RichHandler
 from torch.utils.data import DataLoader, RandomSampler
 
+# Try to import psutil for memory tracking
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 from config import (
     TripletTrainingConfig,
     load_config_from_file,
@@ -35,6 +42,78 @@ from train_specialized_embeddings.loss import TripletLossWrapper
 
 
 LOGGER_NAME = "train_specialized_embeddings"
+
+
+def format_bytes(bytes_val: int) -> str:
+    """Format bytes to human-readable string."""
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if bytes_val < 1024.0:
+            return f"{bytes_val:.2f} {unit}"
+        bytes_val /= 1024.0
+    return f"{bytes_val:.2f} PB"
+
+
+def get_memory_usage() -> dict[str, Any]:
+    """
+    Get current memory usage information.
+    
+    Returns:
+        Dictionary with memory usage information including:
+        - rss_mb: Resident Set Size in MB
+        - rss_gb: Resident Set Size in GB
+        - rss_formatted: Formatted RSS string
+        - gpu_allocated_mb: GPU allocated memory in MB (if CUDA available)
+        - gpu_reserved_mb: GPU reserved memory in MB (if CUDA available)
+        - gpu_allocated_formatted: Formatted GPU allocated memory string
+    """
+    info: dict[str, Any] = {}
+    
+    # Get process memory
+    if PSUTIL_AVAILABLE:
+        process = psutil.Process(os.getpid())
+        mem_info = process.memory_info()
+        info["rss_mb"] = mem_info.rss / (1024 * 1024)
+        info["rss_gb"] = mem_info.rss / (1024 * 1024 * 1024)
+        info["rss_formatted"] = format_bytes(mem_info.rss)
+    else:
+        # Fallback: try to use resource module (Unix only)
+        try:
+            import resource
+            mem_info = resource.getrusage(resource.RUSAGE_SELF)
+            rss_bytes = mem_info.ru_maxrss * 1024  # ru_maxrss is in KB on Linux
+            info["rss_mb"] = rss_bytes / (1024 * 1024)
+            info["rss_gb"] = rss_bytes / (1024 * 1024 * 1024)
+            info["rss_formatted"] = format_bytes(rss_bytes)
+        except (ImportError, AttributeError):
+            info["rss_mb"] = None
+            info["rss_gb"] = None
+            info["rss_formatted"] = "unknown"
+    
+    # Get GPU memory if available
+    if torch.cuda.is_available():
+        info["gpu_allocated_mb"] = torch.cuda.memory_allocated(0) / (1024 * 1024)
+        info["gpu_reserved_mb"] = torch.cuda.memory_reserved(0) / (1024 * 1024)
+        info["gpu_allocated_formatted"] = format_bytes(int(torch.cuda.memory_allocated(0)))
+        info["gpu_reserved_formatted"] = format_bytes(int(torch.cuda.memory_reserved(0)))
+    else:
+        info["gpu_allocated_mb"] = None
+        info["gpu_reserved_mb"] = None
+        info["gpu_allocated_formatted"] = None
+        info["gpu_reserved_formatted"] = None
+    
+    return info
+
+
+def log_memory_usage(logger: logging.Logger, stage: str) -> None:
+    """Log memory usage at a specific stage."""
+    mem_info = get_memory_usage()
+    
+    logger.info(f"Memory usage [{stage}]: RSS={mem_info['rss_formatted']}")
+    if mem_info.get("gpu_allocated_formatted"):
+        logger.info(
+            f"GPU memory [{stage}]: allocated={mem_info['gpu_allocated_formatted']}, "
+            f"reserved={mem_info['gpu_reserved_formatted']}"
+        )
 
 
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
@@ -232,6 +311,21 @@ def load_data(
         difficulty_path, columns=difficulty_cols, engine="pyarrow"
     )
     logger.info(f"Loaded {len(difficulty_df):,} difficulty metadata entries")
+
+    # Log memory usage after loading dataframes
+    log_memory_usage(logger, "after_data_loading")
+    
+    # Log dataframe memory usage
+    if PSUTIL_AVAILABLE:
+        train_mem = train_df.memory_usage(deep=True).sum()
+        val_mem = val_df.memory_usage(deep=True).sum()
+        difficulty_mem = difficulty_df.memory_usage(deep=True).sum()
+        total_df_mem = train_mem + val_mem + difficulty_mem
+        logger.info(
+            f"DataFrame memory: train={format_bytes(train_mem)}, "
+            f"val={format_bytes(val_mem)}, difficulty={format_bytes(difficulty_mem)}, "
+            f"total={format_bytes(total_df_mem)}"
+        )
 
     # Validate required columns
     required_train_cols = {"building_id", "embedding"}
@@ -529,6 +623,19 @@ def train(config: TripletTrainingConfig) -> int:
         logger.info("Creating datasets...")
         train_dataset = TripletDataset(train_df, difficulty_df, config)
         val_dataset = TripletDataset(val_df, difficulty_df, config)
+        
+        # Log memory usage after creating datasets
+        log_memory_usage(logger, "after_dataset_creation")
+        
+        # Log embedding tensor memory usage
+        train_emb_mem = train_dataset.embeddings.element_size() * train_dataset.embeddings.nelement()
+        val_emb_mem = val_dataset.embeddings.element_size() * val_dataset.embeddings.nelement()
+        logger.info(
+            f"Embedding tensor memory: train={format_bytes(train_emb_mem)} "
+            f"({len(train_dataset.embeddings):,} embeddings, dtype={train_dataset.embeddings.dtype}), "
+            f"val={format_bytes(val_emb_mem)} "
+            f"({len(val_dataset.embeddings):,} embeddings, dtype={val_dataset.embeddings.dtype})"
+        )
 
         # Create data loaders
         train_loader = DataLoader(
@@ -552,6 +659,22 @@ def train(config: TripletTrainingConfig) -> int:
             use_residual=config.use_residual,
             use_layer_norm=config.use_layer_norm,
         ).to(device)
+        
+        # Log memory usage after model initialization
+        log_memory_usage(logger, "after_model_init")
+        
+        # Log model parameter count and memory
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        model_mem = sum(p.numel() * p.element_size() for p in model.parameters())
+        logger.info(
+            f"Model: {total_params:,} total parameters ({trainable_params:,} trainable), "
+            f"memory={format_bytes(model_mem)}"
+        )
+        
+        if device.type == "cuda":
+            gpu_mem_after_model = torch.cuda.memory_allocated(0) / (1024 * 1024 * 1024)
+            logger.info(f"GPU memory after model init: {gpu_mem_after_model:.2f} GB")
 
         # Initialize loss function
         loss_fn = TripletLossWrapper(
@@ -564,6 +687,9 @@ def train(config: TripletTrainingConfig) -> int:
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
+        
+        # Log memory after optimizer initialization (Adam stores momentum buffers)
+        log_memory_usage(logger, "after_optimizer_init")
 
         # Resume from checkpoint if specified
         start_epoch = 0
@@ -578,6 +704,9 @@ def train(config: TripletTrainingConfig) -> int:
         logger.info(f"Total epochs: {config.num_epochs}")
         logger.info(f"Batch size: {config.batch_size}")
         logger.info(f"Learning rate: {config.learning_rate}")
+        
+        # Log memory before training starts
+        log_memory_usage(logger, "before_training")
 
         best_val_loss = float("inf")
         best_val_epoch: int | None = None
@@ -596,7 +725,19 @@ def train(config: TripletTrainingConfig) -> int:
 
             epoch_start_time = time.time()
 
-            for _, batch in enumerate(train_loader):
+            for batch_idx, batch in enumerate(train_loader):
+                # Log memory periodically during training (every 100 batches)
+                if batch_idx > 0 and batch_idx % 100 == 0:
+                    mem_info = get_memory_usage()
+                    logger.info(
+                        f"Memory [epoch {epoch+1}, batch {batch_idx}]: "
+                        f"RSS={mem_info['rss_formatted']}"
+                    )
+                    if mem_info.get("gpu_allocated_formatted"):
+                        logger.info(
+                            f"GPU memory [epoch {epoch+1}, batch {batch_idx}]: "
+                            f"allocated={mem_info['gpu_allocated_formatted']}"
+                        )
                 anchor = batch.anchor_embedding.to(device)
                 positive = batch.positive_embedding.to(device)
                 negative = batch.negative_embedding.to(device)
@@ -645,6 +786,9 @@ def train(config: TripletTrainingConfig) -> int:
             avg_epoch_loss = (
                 epoch_loss / num_batches if num_batches > 0 else float("inf")
             )
+            
+            # Log memory after each epoch
+            log_memory_usage(logger, f"after_epoch_{epoch+1}")
 
             logger.info(
                 f"Epoch {epoch+1}/{config.num_epochs} completed in {epoch_elapsed:.2f}s, "
