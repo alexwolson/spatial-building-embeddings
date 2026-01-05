@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+
+import pyarrow.parquet as pq
 import numpy as np
 import pandas as pd
 import torch
@@ -105,25 +107,57 @@ def get_data_loader_config(device: torch.device) -> tuple[int, bool]:
     return num_workers, pin_memory
 
 
+def _validate_parquet_path(
+    path: Path | str, label: str, logger: logging.Logger
+) -> Path:
+    """Validate a parquet path and raise early if it's missing or malformed."""
+    resolved = Path(path)
+    logger.info(
+        "%s parquet path resolved | type=%s | path=%s",
+        label,
+        type(path).__name__,
+        resolved,
+    )
+
+    if not resolved.exists():
+        raise FileNotFoundError(f"{label} parquet file not found: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"{label} parquet path is not a file: {resolved}")
+
+    try:
+        # Quick footer/magic-byte check so we fail with a clearer message than "<Buffer>"
+        pq.ParquetFile(resolved)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"{label} parquet is invalid: {exc}") from exc
+
+    return resolved
+
+
 def load_data(
     config: TripletTrainingConfig, logger: logging.Logger
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load training, validation, and difficulty metadata dataframes."""
     logger.info("Loading data files...")
 
-    # Load training data
-    logger.info(f"Loading training data from: {config.train_parquet_path}")
-    train_df = pd.read_parquet(config.train_parquet_path, engine="pyarrow")
+    train_path = _validate_parquet_path(
+        config.train_parquet_path, "train", logger
+    )
+    logger.info(f"Loading training data from: {train_path}")
+    train_df = pd.read_parquet(train_path, engine="pyarrow")
     logger.info(f"Loaded {len(train_df):,} training samples")
 
     # Load validation data
-    logger.info(f"Loading validation data from: {config.val_parquet_path}")
-    val_df = pd.read_parquet(config.val_parquet_path, engine="pyarrow")
+    val_path = _validate_parquet_path(config.val_parquet_path, "val", logger)
+    logger.info(f"Loading validation data from: {val_path}")
+    val_df = pd.read_parquet(val_path, engine="pyarrow")
     logger.info(f"Loaded {len(val_df):,} validation samples")
 
     # Load difficulty metadata
-    logger.info(f"Loading difficulty metadata from: {config.difficulty_metadata_path}")
-    difficulty_df = pd.read_parquet(config.difficulty_metadata_path, engine="pyarrow")
+    difficulty_path = _validate_parquet_path(
+        config.difficulty_metadata_path, "difficulty", logger
+    )
+    logger.info(f"Loading difficulty metadata from: {difficulty_path}")
+    difficulty_df = pd.read_parquet(difficulty_path, engine="pyarrow")
     logger.info(f"Loaded {len(difficulty_df):,} difficulty metadata entries")
 
     # Validate required columns
