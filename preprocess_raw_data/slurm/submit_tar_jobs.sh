@@ -207,13 +207,22 @@ SUBMIT_OUTPUT=$(sbatch \
     "${SBATCH_SCRIPT}" 2>&1)
 
 if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
-    JOB_ID=$(echo "${SUBMIT_OUTPUT}" | grep -oE '[0-9]+' | head -n 1)
+    # Extract the job ID from sbatch output
+    # For job arrays, sbatch returns "Submitted batch job <BASE_ID>"
+    # In squeue, array jobs appear as <BASE_ID>_<ARRAY_INDEX>
+    JOB_ID=$(echo "${SUBMIT_OUTPUT}" | sed -n 's/.*Submitted batch job \([0-9]\+\).*/\1/p')
+    
+    if [ -z "${JOB_ID}" ]; then
+        # Fallback to old method if sed fails
+        JOB_ID=$(echo "${SUBMIT_OUTPUT}" | grep -oE '[0-9]+' | head -n 1)
+    fi
     
     echo ""
     echo "=========================================="
     echo "Job Submission Summary"
     echo "=========================================="
-    echo "Job ID: ${JOB_ID}"
+    echo "Job array base ID: ${JOB_ID}"
+    echo "Array specification: ${ARRAY_SPEC}"
     echo "Number of tasks: ${NUM_TARS}"
     echo "Max concurrent: ${MAX_CONCURRENT}"
     echo "Time limit: ${TIME}"
@@ -227,11 +236,14 @@ if echo "${SUBMIT_OUTPUT}" | grep -q "Submitted batch job"; then
     echo "Tar list file: ${TAR_LIST_FILE}"
     echo ""
     echo "Monitor job status:"
-    echo "  squeue -j ${JOB_ID}"
+    echo "  squeue -j ${JOB_ID}              # All array tasks"
+    echo "  squeue -u \$(whoami)             # All your jobs (shows array jobs as ${JOB_ID}_1, ${JOB_ID}_2, ...)"
     echo ""
     echo "View logs:"
     echo "  tail -f ${LOG_DIR}/process_tar_${JOB_ID}_*.out"
     echo "  tail -f ${LOG_DIR}/process_tar_${JOB_ID}_*.err"
+    echo ""
+    echo "Note: In squeue, array jobs appear as ${JOB_ID}_<index> (e.g., ${JOB_ID}_1, ${JOB_ID}_2)"
     echo "=========================================="
     exit 0
 else
