@@ -139,17 +139,85 @@ def load_data(
     """Load training, validation, and difficulty metadata dataframes."""
     logger.info("Loading data files...")
 
+    # Define required columns for train/val (with fallbacks for streetview_image_id)
+    # Try to read streetview_image_id first, but allow fallback to dataset_id/patch_id or target_coord_hash
     train_path = _validate_parquet_path(
         config.train_parquet_path, "train", logger
     )
     logger.info(f"Loading training data from: {train_path}")
-    train_df = pd.read_parquet(train_path, engine="pyarrow")
+    
+    # Read only essential columns to reduce memory usage
+    # Try to determine which columns exist first
+    train_schema = pq.ParquetFile(train_path).schema_arrow
+    available_cols = set(train_schema.names)
+    
+    # Required columns
+    train_cols = ["building_id", "embedding"]
+    # Optional columns for streetview_image_id (prefer streetview_image_id, fallback to components)
+    if "streetview_image_id" in available_cols:
+        train_cols.append("streetview_image_id")
+    elif "dataset_id" in available_cols and "patch_id" in available_cols:
+        train_cols.extend(["dataset_id", "patch_id"])
+    elif "target_coord_hash" in available_cols:
+        train_cols.append("target_coord_hash")
+    
+    train_df = pd.read_parquet(train_path, columns=train_cols, engine="pyarrow")
+    
+    # Apply sampling if configured (sample_rows takes precedence over sample_fraction)
+    if config.sample_rows is not None and config.sample_rows > 0:
+        sample_size = min(config.sample_rows, len(train_df))
+        train_df = train_df.sample(
+            n=sample_size, random_state=config.seed or 42
+        ).reset_index(drop=True)
+        logger.info(
+            f"Sampled {len(train_df):,} training samples (requested {config.sample_rows:,})"
+        )
+    elif config.sample_fraction is not None and config.sample_fraction < 1.0:
+        original_len = len(train_df)
+        train_df = train_df.sample(
+            frac=config.sample_fraction, random_state=config.seed or 42
+        ).reset_index(drop=True)
+        logger.info(
+            f"Sampled {len(train_df):,} training samples ({config.sample_fraction*100:.1f}% of {original_len:,})"
+        )
+    
     logger.info(f"Loaded {len(train_df):,} training samples")
 
     # Load validation data
     val_path = _validate_parquet_path(config.val_parquet_path, "val", logger)
     logger.info(f"Loading validation data from: {val_path}")
-    val_df = pd.read_parquet(val_path, engine="pyarrow")
+    
+    val_schema = pq.ParquetFile(val_path).schema_arrow
+    available_cols = set(val_schema.names)
+    
+    val_cols = ["building_id", "embedding"]
+    if "streetview_image_id" in available_cols:
+        val_cols.append("streetview_image_id")
+    elif "dataset_id" in available_cols and "patch_id" in available_cols:
+        val_cols.extend(["dataset_id", "patch_id"])
+    elif "target_coord_hash" in available_cols:
+        val_cols.append("target_coord_hash")
+    
+    val_df = pd.read_parquet(val_path, columns=val_cols, engine="pyarrow")
+    
+    # Apply sampling to validation if configured (val_sample_rows takes precedence over val_sample_fraction)
+    if config.val_sample_rows is not None and config.val_sample_rows > 0:
+        sample_size = min(config.val_sample_rows, len(val_df))
+        val_df = val_df.sample(
+            n=sample_size, random_state=config.seed or 42
+        ).reset_index(drop=True)
+        logger.info(
+            f"Sampled {len(val_df):,} validation samples (requested {config.val_sample_rows:,})"
+        )
+    elif config.val_sample_fraction is not None and config.val_sample_fraction < 1.0:
+        original_len = len(val_df)
+        val_df = val_df.sample(
+            frac=config.val_sample_fraction, random_state=config.seed or 42
+        ).reset_index(drop=True)
+        logger.info(
+            f"Sampled {len(val_df):,} validation samples ({config.val_sample_fraction*100:.1f}% of {original_len:,})"
+        )
+    
     logger.info(f"Loaded {len(val_df):,} validation samples")
 
     # Load difficulty metadata
@@ -157,7 +225,12 @@ def load_data(
         config.difficulty_metadata_path, "difficulty", logger
     )
     logger.info(f"Loading difficulty metadata from: {difficulty_path}")
-    difficulty_df = pd.read_parquet(difficulty_path, engine="pyarrow")
+    
+    # Only read required columns for difficulty metadata
+    difficulty_cols = ["target_coord_hash", "neighbor_building_ids", "neighbor_bands"]
+    difficulty_df = pd.read_parquet(
+        difficulty_path, columns=difficulty_cols, engine="pyarrow"
+    )
     logger.info(f"Loaded {len(difficulty_df):,} difficulty metadata entries")
 
     # Validate required columns
@@ -300,7 +373,8 @@ def compute_retrieval_metrics(
     projection_batch_size = 4096
     with torch.no_grad():
         for start in range(0, num_embeddings, projection_batch_size):
-            batch = val_dataset.embeddings[start : start + projection_batch_size].to(
+            # Convert to float32 for numerical stability (stored as float16 for memory savings)
+            batch = val_dataset.embeddings[start : start + projection_batch_size].float().to(
                 device
             )
             projected_batch = model(batch).cpu()

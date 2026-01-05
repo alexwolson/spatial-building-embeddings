@@ -378,6 +378,49 @@ class TripletTrainingConfig(BaseSettings):
         description="Cap on how many samples to draw per building when evaluating retrieval (0 disables the cap)",
     )
 
+    # Data sampling for memory reduction (useful for Optuna tuning)
+    sample_fraction: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of training data to sample (0.0-1.0). "
+            "If set, randomly samples this fraction of train.parquet rows. "
+            "Useful for reducing memory during hyperparameter tuning. "
+            "None (default) loads full dataset."
+        ),
+    )
+    sample_rows: int | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Number of training rows to sample. "
+            "If set, randomly samples this many rows from train.parquet. "
+            "Takes precedence over sample_fraction if both are set. "
+            "None (default) loads full dataset."
+        ),
+    )
+    val_sample_fraction: float | None = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fraction of validation data to sample (0.0-1.0). "
+            "If set, randomly samples this fraction of val.parquet rows. "
+            "None (default) loads full validation dataset."
+        ),
+    )
+    val_sample_rows: int | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Number of validation rows to sample. "
+            "If set, randomly samples this many rows from val.parquet. "
+            "Takes precedence over val_sample_fraction if both are set. "
+            "None (default) loads full validation dataset."
+        ),
+    )
+
     # Logging
     log_file: Path | None = Field(None, description="Optional log file path")
     log_every_n_batches: int = Field(

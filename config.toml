@@ -66,6 +66,17 @@ retrieval_metric_top_k = [1, 5, 10, 100, 1000]
 retrieval_metric_max_queries = 4096
 retrieval_metric_per_building_limit = 4
 
+# Data sampling for memory reduction (useful for Optuna tuning)
+# Set these to reduce memory usage during hyperparameter tuning
+# sample_fraction = null        # Fraction of training data to sample (0.0-1.0), null = load full dataset
+# sample_rows = null            # Number of training rows to sample (takes precedence over sample_fraction), null = load full dataset
+# val_sample_fraction = null    # Fraction of validation data to sample (0.0-1.0), null = load full dataset
+# val_sample_rows = null        # Number of validation rows to sample (takes precedence over val_sample_fraction), null = load full dataset
+# Example for 10% sampling: sample_fraction = 0.1
+# Example for 100k rows: sample_rows = 100000
+sample_fraction = 0.1
+val_sample_fraction = 0.1
+
 # Best training configuration (for fetch_best_and_train.py)
 best_training_trial_name_pattern = ".*-trial-.*"  # Regex pattern to match Optuna trial run names in WandB
 best_training_metric_name = "val/retrieval_recall@100"  # Metric name to use for selecting best run from WandB

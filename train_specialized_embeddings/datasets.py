@@ -78,11 +78,12 @@ class TripletDataset(Dataset):
             self.streetview_image_ids = embeddings_df["streetview_image_id"].astype(str).to_numpy(copy=False)
 
         # Materialise embeddings once and place them in shared memory for DataLoader workers
-        logger.info("Materialising embedding tensor for triplet sampling...")
+        # Use float16 to reduce memory usage (halves memory footprint)
+        logger.info("Materialising embedding tensor for triplet sampling (float16)...")
         embedding_matrix = np.stack(
             embeddings_df["embedding"].to_numpy(),  # array of lists
             axis=0,
-        ).astype(np.float32, copy=False)
+        ).astype(np.float16, copy=False)
         self.embeddings = torch.as_tensor(embedding_matrix)
         self.embeddings.share_memory_()
         del embedding_matrix
@@ -193,10 +194,11 @@ class TripletDataset(Dataset):
         anchor_image_id = self.streetview_image_ids[anchor_idx]
         negative_idx, difficulty_band = self._sample_negative(anchor_image_id, building_id)
 
-        # Get embeddings
-        anchor_emb = self.embeddings[anchor_idx]
-        positive_emb = self.embeddings[positive_idx]
-        negative_emb = self.embeddings[negative_idx]
+        # Get embeddings and convert to float32 for numerical stability
+        # (stored as float16 for memory savings, but model expects float32)
+        anchor_emb = self.embeddings[anchor_idx].float()
+        positive_emb = self.embeddings[positive_idx].float()
+        negative_emb = self.embeddings[negative_idx].float()
 
         return TripletSample(
             anchor_idx=anchor_idx,
