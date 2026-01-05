@@ -117,6 +117,41 @@ def log_memory_usage(logger: logging.Logger, stage: str) -> None:
         )
 
 
+def _chunked_take(scanner: ds.Scanner, indices: list[int], chunk_size: int = 20000) -> pa.Table:
+    """
+    Take rows from a scanner in chunks to avoid Arrow offset overflow.
+    
+    PyArrow's take() can fail with "offset overflow" when given too many indices
+    at once. This function chunks the indices and processes them incrementally.
+    
+    Args:
+        scanner: PyArrow dataset scanner
+        indices: List of row indices to take
+        chunk_size: Number of indices to process per chunk (default: 20,000)
+    
+    Returns:
+        Concatenated Arrow table with all selected rows
+    """
+    import pyarrow as pa
+    
+    if len(indices) == 0:
+        # Return empty table with same schema
+        return scanner.to_table().slice(0, 0)
+    
+    # Split indices into chunks
+    chunks = []
+    for i in range(0, len(indices), chunk_size):
+        chunk_indices = indices[i : i + chunk_size]
+        chunk_table = scanner.take(chunk_indices)
+        chunks.append(chunk_table)
+    
+    # Concatenate all chunks
+    if len(chunks) == 1:
+        return chunks[0]
+    else:
+        return pa.concat_tables(chunks)
+
+
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
     """Configure logging with a Rich console handler and optional file output."""
     handlers: list[logging.Handler] = []
@@ -279,9 +314,9 @@ def load_data(
         
         logger.info(f"Selected {len(selected_indices):,} random row indices")
         
-        # Convert to Arrow table with selected rows using take()
+        # Convert to Arrow table with selected rows using chunked take() to avoid offset overflow
         scanner = dataset.scanner(columns=train_cols)
-        table = scanner.take(selected_indices.tolist())
+        table = _chunked_take(scanner, selected_indices.tolist())
         train_df = table.to_pandas()
         
         logger.info(f"Loaded {len(train_df):,} training samples (sampled during read)")
@@ -337,9 +372,9 @@ def load_data(
         
         logger.info(f"Selected {len(selected_val_indices):,} random validation row indices")
         
-        # Get selected rows
+        # Get selected rows using chunked take() to avoid offset overflow
         val_scanner = val_dataset.scanner(columns=val_cols)
-        val_table = val_scanner.take(selected_val_indices.tolist())
+        val_table = _chunked_take(val_scanner, selected_val_indices.tolist())
         val_df = val_table.to_pandas()
         
         logger.info(f"Loaded {len(val_df):,} validation samples (sampled during read)")
