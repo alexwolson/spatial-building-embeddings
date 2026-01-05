@@ -186,7 +186,7 @@ def build_config_with_updates(
     base_config: TripletTrainingConfig,
     updates: dict[str, Any],
 ) -> TripletTrainingConfig:
-    payload = base_config.model_dump()
+    payload = base_config.model_dump(mode='json')
     payload.update(updates)
     return TripletTrainingConfig(**payload)
 
