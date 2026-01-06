@@ -152,6 +152,111 @@ def _chunked_take(scanner: ds.Scanner, indices: list[int], chunk_size: int = 200
         return pa.concat_tables(chunks)
 
 
+def _sample_by_building(
+    dataset: ds.Dataset,
+    columns: list[str],
+    sample_fraction: float | None = None,
+    sample_buildings: int | None = None,
+    seed: int = 42,
+    logger: logging.Logger | None = None,
+) -> pd.DataFrame:
+    """
+    Sample data by building_id to preserve building integrity.
+    
+    This function samples unique building_ids first, then loads all rows for
+    selected buildings. This prevents singleton buildings in the sample.
+    
+    Args:
+        dataset: PyArrow dataset
+        columns: List of columns to read
+        sample_fraction: Fraction of buildings to sample (0.0-1.0)
+        sample_buildings: Number of buildings to sample (takes precedence over sample_fraction)
+        seed: Random seed for reproducibility
+        logger: Optional logger for progress messages
+    
+    Returns:
+        pandas DataFrame with sampled data
+    """
+    if logger is None:
+        logger = logging.getLogger(__name__)
+    
+    # Pass 1: Read only building_id column to get unique buildings (memory-efficient)
+    logger.info("Pass 1: Reading building_id column to identify unique buildings...")
+    building_id_scanner = dataset.scanner(columns=["building_id"])
+    building_id_table = building_id_scanner.to_table()
+    building_id_df = building_id_table.to_pandas()
+    
+    # Get unique building_ids and their counts
+    building_counts = building_id_df["building_id"].value_counts()
+    unique_buildings = building_counts.index.tolist()
+    total_buildings = len(unique_buildings)
+    total_rows = len(building_id_df)
+    
+    logger.info(
+        f"Found {total_buildings:,} unique buildings with {total_rows:,} total rows "
+        f"(avg {total_rows/total_buildings:.1f} images per building)"
+    )
+    
+    # Determine how many buildings to sample
+    if sample_buildings is not None and sample_buildings > 0:
+        num_buildings_to_sample = min(sample_buildings, total_buildings)
+        logger.info(
+            f"Sampling {num_buildings_to_sample:,} buildings (requested {sample_buildings:,})"
+        )
+    elif sample_fraction is not None and sample_fraction < 1.0:
+        num_buildings_to_sample = max(1, int(total_buildings * sample_fraction))
+        logger.info(
+            f"Sampling {num_buildings_to_sample:,} buildings ({sample_fraction*100:.1f}% of {total_buildings:,})"
+        )
+    else:
+        # No sampling - return all
+        logger.info("No sampling configured, loading all buildings")
+        scanner = dataset.scanner(columns=columns)
+        table = scanner.to_table()
+        return table.to_pandas()
+    
+    # Sample building_ids randomly
+    rng = np.random.RandomState(seed)
+    selected_building_ids = rng.choice(
+        unique_buildings, size=num_buildings_to_sample, replace=False
+    )
+    # Convert to list (rng.choice returns numpy array)
+    selected_building_ids_list = selected_building_ids.tolist()
+    selected_building_ids_set = set(selected_building_ids_list)
+    
+    logger.info(f"Selected {len(selected_building_ids_set):,} buildings for sampling")
+    
+    # Pass 2: Filter dataset to selected building_ids and read full data
+    logger.info("Pass 2: Loading all rows for selected buildings...")
+    
+    # Use PyArrow filter to get only rows with selected building_ids
+    import pyarrow.compute as pc
+    
+    # Create filter expression: building_id in selected_building_ids
+    # Convert selected building_ids to Arrow array
+    selected_building_ids_array = pa.array(selected_building_ids_list, type=pa.string())
+    
+    # Create filter using is_in function
+    # Note: is_in expects the field and a value_set (Arrow array)
+    filter_expr = pc.is_in(ds.field("building_id"), value_set=selected_building_ids_array)
+    
+    # Apply filter and read selected columns
+    filtered_dataset = dataset.filter(filter_expr)
+    scanner = filtered_dataset.scanner(columns=columns)
+    table = scanner.to_table()
+    result_df = table.to_pandas()
+    
+    # Verify we got data for all selected buildings
+    actual_buildings = result_df["building_id"].nunique()
+    actual_rows = len(result_df)
+    logger.info(
+        f"Loaded {actual_rows:,} rows from {actual_buildings:,} buildings "
+        f"(avg {actual_rows/actual_buildings:.1f} images per building)"
+    )
+    
+    return result_df
+
+
 def setup_logging(log_file: Path | None = None) -> logging.Logger:
     """Configure logging with a Rich console handler and optional file output."""
     handlers: list[logging.Handler] = []
@@ -284,42 +389,26 @@ def load_data(
     
     # Check if sampling is configured - if so, use PyArrow dataset API to sample during read
     needs_sampling = (
-        (config.sample_rows is not None and config.sample_rows > 0)
+        (config.sample_buildings is not None and config.sample_buildings > 0)
         or (config.sample_fraction is not None and config.sample_fraction < 1.0)
     )
     
     if needs_sampling:
-        # Use PyArrow dataset API to sample during read (avoids loading full file into memory)
-        logger.info("Using PyArrow dataset API for memory-efficient sampling...")
+        # Use building-based sampling to preserve building integrity
+        logger.info("Using building-based sampling to preserve building integrity...")
         dataset = ds.dataset(train_path, format="parquet")
         
-        # Get total row count first (this is metadata-only, doesn't load data)
-        total_rows = dataset.count_rows()
-        logger.info(f"Total rows in parquet file: {total_rows:,}")
+        # Use building-based sampling
+        train_df = _sample_by_building(
+            dataset=dataset,
+            columns=train_cols,
+            sample_fraction=config.sample_fraction if config.sample_buildings is None else None,
+            sample_buildings=config.sample_buildings,
+            seed=config.seed or 42,
+            logger=logger,
+        )
         
-        # Determine sample size
-        if config.sample_rows is not None and config.sample_rows > 0:
-            sample_size = min(config.sample_rows, total_rows)
-            logger.info(f"Sampling {sample_size:,} rows (requested {config.sample_rows:,})")
-        else:
-            sample_size = int(total_rows * config.sample_fraction)
-            logger.info(
-                f"Sampling {sample_size:,} rows ({config.sample_fraction*100:.1f}% of {total_rows:,})"
-            )
-        
-        # Random sampling: select random row indices, then use take() to get only those rows
-        rng = np.random.RandomState(config.seed or 42)
-        selected_indices = rng.choice(total_rows, size=sample_size, replace=False)
-        selected_indices = np.sort(selected_indices)  # Sort for efficient reading
-        
-        logger.info(f"Selected {len(selected_indices):,} random row indices")
-        
-        # Convert to Arrow table with selected rows using chunked take() to avoid offset overflow
-        scanner = dataset.scanner(columns=train_cols)
-        table = _chunked_take(scanner, selected_indices.tolist())
-        train_df = table.to_pandas()
-        
-        logger.info(f"Loaded {len(train_df):,} training samples (sampled during read)")
+        logger.info(f"Loaded {len(train_df):,} training samples (building-based sampling)")
     else:
         # No sampling configured - use standard approach
         train_df = pd.read_parquet(train_path, columns=train_cols, engine="pyarrow")
@@ -342,42 +431,26 @@ def load_data(
     
     # Check if validation sampling is configured
     needs_val_sampling = (
-        (config.val_sample_rows is not None and config.val_sample_rows > 0)
+        (config.val_sample_buildings is not None and config.val_sample_buildings > 0)
         or (config.val_sample_fraction is not None and config.val_sample_fraction < 1.0)
     )
     
     if needs_val_sampling:
-        # Use PyArrow dataset API to sample during read
-        logger.info("Using PyArrow dataset API for memory-efficient validation sampling...")
+        # Use building-based sampling for validation to preserve building integrity
+        logger.info("Using building-based sampling for validation...")
         val_dataset = ds.dataset(val_path, format="parquet")
         
-        # Get total row count first
-        total_val_rows = val_dataset.count_rows()
-        logger.info(f"Total rows in validation parquet file: {total_val_rows:,}")
+        # Use building-based sampling
+        val_df = _sample_by_building(
+            dataset=val_dataset,
+            columns=val_cols,
+            sample_fraction=config.val_sample_fraction if config.val_sample_buildings is None else None,
+            sample_buildings=config.val_sample_buildings,
+            seed=config.seed or 42,
+            logger=logger,
+        )
         
-        # Determine sample size
-        if config.val_sample_rows is not None and config.val_sample_rows > 0:
-            val_sample_size = min(config.val_sample_rows, total_val_rows)
-            logger.info(f"Sampling {val_sample_size:,} validation rows (requested {config.val_sample_rows:,})")
-        else:
-            val_sample_size = int(total_val_rows * config.val_sample_fraction)
-            logger.info(
-                f"Sampling {val_sample_size:,} validation rows ({config.val_sample_fraction*100:.1f}% of {total_val_rows:,})"
-            )
-        
-        # Random sampling for validation
-        rng = np.random.RandomState(config.seed or 42)
-        selected_val_indices = rng.choice(total_val_rows, size=val_sample_size, replace=False)
-        selected_val_indices = np.sort(selected_val_indices)
-        
-        logger.info(f"Selected {len(selected_val_indices):,} random validation row indices")
-        
-        # Get selected rows using chunked take() to avoid offset overflow
-        val_scanner = val_dataset.scanner(columns=val_cols)
-        val_table = _chunked_take(val_scanner, selected_val_indices.tolist())
-        val_df = val_table.to_pandas()
-        
-        logger.info(f"Loaded {len(val_df):,} validation samples (sampled during read)")
+        logger.info(f"Loaded {len(val_df):,} validation samples (building-based sampling)")
     else:
         # No sampling configured - use standard approach
         val_df = pd.read_parquet(val_path, columns=val_cols, engine="pyarrow")

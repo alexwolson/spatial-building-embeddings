@@ -390,12 +390,13 @@ class TripletTrainingConfig(BaseSettings):
             "None (default) loads full dataset."
         ),
     )
-    sample_rows: int | None = Field(
+    sample_buildings: int | None = Field(
         None,
         ge=0,
         description=(
-            "Number of training rows to sample. "
-            "If set, randomly samples this many rows from train.parquet. "
+            "Number of buildings to sample for training. "
+            "If set, randomly samples this many buildings from train.parquet. "
+            "All images from selected buildings are included. "
             "Takes precedence over sample_fraction if both are set. "
             "None (default) loads full dataset."
         ),
@@ -410,12 +411,13 @@ class TripletTrainingConfig(BaseSettings):
             "None (default) loads full validation dataset."
         ),
     )
-    val_sample_rows: int | None = Field(
+    val_sample_buildings: int | None = Field(
         None,
         ge=0,
         description=(
-            "Number of validation rows to sample. "
-            "If set, randomly samples this many rows from val.parquet. "
+            "Number of buildings to sample for validation. "
+            "If set, randomly samples this many buildings from val.parquet. "
+            "All images from selected buildings are included. "
             "Takes precedence over val_sample_fraction if both are set. "
             "None (default) loads full validation dataset."
         ),
