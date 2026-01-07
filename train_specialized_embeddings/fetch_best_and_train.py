@@ -5,6 +5,10 @@ Fetch best hyperparameters from WandB Optuna trials and train final model.
 This script queries WandB to find the best Optuna trial (by retrieval_recall@100),
 extracts its hyperparameters, generates a training config, and immediately runs
 training with unlimited epochs, early stopping, and checkpoint-on-improvement.
+
+Note: This script always uses the full dataset for final training, regardless of
+any subsampling settings (sample_fraction, val_sample_fraction, etc.) in the
+base config. This ensures the final model is trained on all available data.
 """
 
 from __future__ import annotations
@@ -258,6 +262,11 @@ def main() -> int:
         "early_stopping_patience": 10,
         "save_every_n_epochs": 1,
         "resume_from_checkpoint": None,
+        # Always use full dataset for final training (disable any subsampling from config)
+        "sample_fraction": None,
+        "sample_buildings": None,
+        "val_sample_fraction": None,
+        "val_sample_buildings": None,
     }
     if not config.wandb_run_name:
         overrides["wandb_run_name"] = "best-hyperparams-training"
@@ -271,6 +280,7 @@ def main() -> int:
     )
     logger.info("  Checkpoint directory: %s", training_config.checkpoint_dir)
     logger.info("  WandB enabled: %s", training_config.wandb_enabled)
+    logger.info("  Data sampling: DISABLED (using full dataset for final training)")
 
     # Run training
     logger.info("=" * 60)
