@@ -30,6 +30,8 @@ set -euo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/../../slurm/common.sh"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Defaults
 ACCOUNT="${SLURM_ACCOUNT:-}"
 CONFIG_PATH=""
