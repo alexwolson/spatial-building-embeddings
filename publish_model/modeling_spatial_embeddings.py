@@ -138,7 +138,7 @@ class SpatialEmbeddingsModel(PreTrainedModel):
 
         # Initialize backbone
         self.backbone = AutoModel.from_pretrained(
-            config.backbone_model_name, trust_remote_code=True, safe_serialization=True
+            config.backbone_model_name, trust_remote_code=True
         )
 
         # Initialize projector
