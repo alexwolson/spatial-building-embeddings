@@ -51,28 +51,98 @@ To publish the model, you need a Hugging Face account and the `huggingface_hub` 
 
 ## 4. Usage for End Users
 
-Once uploaded, users can load your model like this:
+### Quick Start: Using the Helper Script
+
+The easiest way to generate embeddings is using the provided script:
+
+```bash
+# Single image
+python publish_model/generate_embeddings_from_hf.py path/to/image.jpg
+
+# Multiple images
+python publish_model/generate_embeddings_from_hf.py image1.jpg image2.jpg image3.jpg
+
+# Save embeddings to file
+python publish_model/generate_embeddings_from_hf.py image.jpg --output embeddings.npy
+
+# Use a different model ID
+MODEL_ID="custom/org/model-name" python publish_model/generate_embeddings_from_hf.py image.jpg
+```
+
+### Python API: Loading from HuggingFace Hub
+
+Users can load your model and generate embeddings programmatically:
 
 ```python
 from transformers import AutoModel, AutoImageProcessor
 from PIL import Image
-import requests
 import torch
+import numpy as np
 
-# Load model
-model_id = "your-username/spatial-building-embeddings"
+# Load model from HuggingFace Hub
+model_id = "alexwaolson/spatial-building-embeddings"
 model = AutoModel.from_pretrained(model_id, trust_remote_code=True)
+model.eval()
 
-# Load processor (from the backbone)
-# The config knows the backbone name, but users might need to specify it if they don't want to trust remote code for config
-backbone_name = model.config.backbone_model_name 
+# Move to GPU if available
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model.to(device)
+
+# Load image processor from the backbone model name
+backbone_name = model.config.backbone_model_name
 processor = AutoImageProcessor.from_pretrained(backbone_name)
 
-# Inference
-image = Image.open("path/to/image.jpg")
+# Load and preprocess image
+image = Image.open("path/to/image.jpg").convert("RGB")
 inputs = processor(images=image, return_tensors="pt")
+inputs = {k: v.to(device) for k, v in inputs.items()}
 
+# Generate embedding
 with torch.no_grad():
-    embeddings = model(**inputs)[0] # shape: [1, 256]
+    outputs = model(**inputs)
+    # The model returns a dict with 'embeddings' key or a tuple
+    if isinstance(outputs, dict):
+        embeddings = outputs["embeddings"]
+    else:
+        embeddings = outputs[0]
+    
+    # Remove batch dimension and convert to numpy
+    embeddings = embeddings.squeeze(0).cpu().numpy()
+
+print(f"Embedding shape: {embeddings.shape}")  # (256,)
+print(f"Embedding norm: {np.linalg.norm(embeddings):.4f}")  # Should be ~1.0
 ```
+
+### Batch Processing
+
+For processing multiple images efficiently:
+
+```python
+# Load images
+image_paths = ["image1.jpg", "image2.jpg", "image3.jpg"]
+images = [Image.open(path).convert("RGB") for path in image_paths]
+
+# Preprocess batch
+inputs = processor(images=images, return_tensors="pt")
+inputs = {k: v.to(device) for k, v in inputs.items()}
+
+# Generate embeddings for batch
+with torch.no_grad():
+    outputs = model(**inputs)
+    if isinstance(outputs, dict):
+        embeddings = outputs["embeddings"]
+    else:
+        embeddings = outputs[0]
+    
+    embeddings_np = embeddings.cpu().numpy()
+
+print(f"Embeddings shape: {embeddings_np.shape}")  # (batch_size, 256)
+```
+
+### Notes
+
+- **Gated Models**: If the model is gated, you'll need to set the `HF_TOKEN` environment variable or login via `huggingface-cli login`
+- **Custom Code**: The `trust_remote_code=True` parameter is required because the model uses custom configuration and modeling classes
+- **Device**: The model works on both CPU and GPU, but GPU is recommended for faster inference
+- **Output**: Embeddings are 256-dimensional vectors with L2 norm approximately 1.0
 
