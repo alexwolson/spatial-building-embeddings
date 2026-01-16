@@ -56,6 +56,16 @@ echo "=========================================="
 # Step 1: Setup environment
 load_python_env "${VENV_PATH:-}" "${PYTHON_MODULE:-}" "${ARROW_MODULE:-}"
 
+# Step 1.5: Set HuggingFace cache to scratch (to avoid filling ~/.cache on home with 50GB quota)
+# HF_HOME controls where all HuggingFace caches are stored (hub, transformers, etc.)
+SCRATCH_BASE="${SCRATCH:-${HOME}/scratch}"
+HF_CACHE_DIR="${SCRATCH_BASE}/spatial-building-embeddings/huggingface_cache"
+mkdir -p "${HF_CACHE_DIR}"
+export HF_HOME="${HF_CACHE_DIR}"
+export TRANSFORMERS_CACHE="${HF_CACHE_DIR}/transformers"
+export HF_HUB_CACHE="${HF_CACHE_DIR}/hub"
+info "HuggingFace cache directory: ${HF_HOME}"
+
 # Step 2: Load CUDA module (required for GPU)
 if command -v nvidia-smi &> /dev/null; then
     echo "CUDA/nvidia-smi available"
