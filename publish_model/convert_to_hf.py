@@ -186,6 +186,14 @@ def main():
 
     logger.info("Successfully loaded projector weights.")
 
+    # 4.5. Register model and config with Transformers auto classes
+    # This is required for Transformers to automatically detect and use the custom code
+    # when loading from HuggingFace Hub with trust_remote_code=True
+    logger.info("Registering model and config with Transformers auto classes...")
+    hf_config.register_for_auto_class()
+    model.register_for_auto_class("AutoModel")
+    logger.info("Registration complete.")
+
     # 5. Save Pretrained Model
     # Use scratch directory to avoid disk quota issues on project filesystem
     # Follow Alliance standard: use $SCRATCH env var, fallback to ~/scratch pattern
@@ -198,18 +206,19 @@ def main():
     output_dir = Path(scratch_base) / "spatial-building-embeddings" / "published_model"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Saving model to {output_dir}")
-    model.save_pretrained(output_dir)
-    # Also save the config separately to be sure (save_pretrained does this)
-    # And copy the python files for custom code
+    # Copy the python files for custom code BEFORE saving
+    # This ensures they're included when save_pretrained() is called
     import shutil
-
+    logger.info("Copying custom code files to output directory...")
     shutil.copy(
         project_root / "publish_model/configuration_spatial_embeddings.py", output_dir
     )
     shutil.copy(
         project_root / "publish_model/modeling_spatial_embeddings.py", output_dir
     )
+
+    logger.info(f"Saving model to {output_dir}")
+    model.save_pretrained(output_dir)
 
     logger.info(f"Done! Model is ready in {output_dir}")
 

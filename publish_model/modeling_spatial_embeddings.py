@@ -2,8 +2,25 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PreTrainedModel, AutoModel
-from .configuration_spatial_embeddings import SpatialEmbeddingsConfig
 from typing import Optional, Tuple, Union, Literal
+
+# Handle import for both local development and HuggingFace Hub loading
+try:
+    from .configuration_spatial_embeddings import SpatialEmbeddingsConfig
+except ImportError:
+    # When loaded from HuggingFace Hub, relative imports may not work
+    # Try absolute import instead
+    try:
+        from configuration_spatial_embeddings import SpatialEmbeddingsConfig
+    except ImportError:
+        # Last resort: import from the module directly
+        import sys
+        from pathlib import Path
+        # Get the directory where this file is located
+        current_dir = Path(__file__).parent
+        if str(current_dir) not in sys.path:
+            sys.path.insert(0, str(current_dir))
+        from configuration_spatial_embeddings import SpatialEmbeddingsConfig
 
 
 class EmbeddingProjector(nn.Module):
