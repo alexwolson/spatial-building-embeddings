@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import sys
 from pathlib import Path
 import torch
@@ -186,8 +187,16 @@ def main():
     logger.info("Successfully loaded projector weights.")
 
     # 5. Save Pretrained Model
-    output_dir = project_root / "published_model"
-    output_dir.mkdir(exist_ok=True)
+    # Use scratch directory to avoid disk quota issues on project filesystem
+    # Follow Alliance standard: use $SCRATCH env var, fallback to ~/scratch pattern
+    scratch_base = os.environ.get("SCRATCH")
+    if scratch_base is None:
+        # Fallback to HOME/scratch pattern (as used in config.toml)
+        home = os.environ.get("HOME", "/home/awolson")
+        scratch_base = os.path.join(home, "scratch")
+    
+    output_dir = Path(scratch_base) / "spatial-building-embeddings" / "published_model"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"Saving model to {output_dir}")
     model.save_pretrained(output_dir)
@@ -202,7 +211,7 @@ def main():
         project_root / "publish_model/modeling_spatial_embeddings.py", output_dir
     )
 
-    logger.info("Done! Model is ready in 'published_model/'")
+    logger.info(f"Done! Model is ready in {output_dir}")
 
 
 if __name__ == "__main__":
