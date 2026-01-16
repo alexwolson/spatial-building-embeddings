@@ -213,6 +213,39 @@ def main():
 
     logger.info(f"Done! Model is ready in {output_dir}")
 
+    # 6. Upload to HuggingFace Hub (if credentials are provided)
+    hf_token = os.environ.get("HF_TOKEN")
+    hf_repo_id = os.environ.get("HF_REPO_ID")
+    
+    if hf_token and hf_repo_id:
+        logger.info(f"Uploading model to HuggingFace Hub: {hf_repo_id}")
+        try:
+            model.push_to_hub(
+                repo_id=hf_repo_id,
+                token=hf_token,
+                private=False,  # Set to True if you want a private repo
+            )
+            logger.info(f"Successfully uploaded model to https://huggingface.co/{hf_repo_id}")
+        except Exception as e:
+            logger.error(f"Failed to upload model to HuggingFace Hub: {e}")
+            logger.info("Model was saved locally but upload failed. You can manually upload later.")
+            raise
+    elif hf_token and not hf_repo_id:
+        logger.warning(
+            "HF_TOKEN is set but HF_REPO_ID is not. Skipping HuggingFace Hub upload. "
+            "Set HF_REPO_ID environment variable (e.g., 'your-username/spatial-building-embeddings') to enable upload."
+        )
+    elif hf_repo_id and not hf_token:
+        logger.warning(
+            "HF_REPO_ID is set but HF_TOKEN is not. Skipping HuggingFace Hub upload. "
+            "Set HF_TOKEN environment variable to enable upload."
+        )
+    else:
+        logger.info(
+            "HF_TOKEN and/or HF_REPO_ID not set. Model saved locally only. "
+            "To upload to HuggingFace Hub, set both environment variables."
+        )
+
 
 if __name__ == "__main__":
     main()
