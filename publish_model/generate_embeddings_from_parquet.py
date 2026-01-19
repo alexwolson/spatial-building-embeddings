@@ -322,7 +322,7 @@ def process_parquet_file(
         }
         for k, v in critical_params.items():
             existing_value = state.get(k) if state is not None else None
-            if k in state and existing_value != v:
+            if existing_value != v:
                 raise ValueError(
                     f"Existing state.json is incompatible for key '{k}'.\n"
                     f"Existing: {existing_value}\n"
@@ -475,14 +475,10 @@ def process_parquet_file(
             _atomic_write_parquet_part(part_path, chunk_osmids, embeddings_array)
 
             # Update state after each successful part write.
-            # Only update the changing values to reduce I/O overhead.
             assert state is not None
-            state_update = {
-                **state,
-                "embeddings_written": int(produced),
-                "last_written_part": str(part_path),
-            }
-            _atomic_write_json(state_path, state_update)
+            state["embeddings_written"] = int(produced)
+            state["last_written_part"] = str(part_path)
+            _atomic_write_json(state_path, state)
 
             if produced % 100 == 0 or (limit is not None and produced >= limit):
                 print(f"Embeddings written: {produced}/{num_rows_to_process} (upper bound)")
