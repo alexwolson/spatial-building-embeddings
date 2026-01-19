@@ -462,10 +462,10 @@ def process_parquet_file(
                     chunk_failures += 1
                     continue
 
-            # Don't write a part file if:
-            # 1. All batches failed (write empty marker to prevent infinite retries)
-            # 2. Some batches failed (skip part to retry on resume)
-            # 3. Batch was truncated by --limit (skip part to process remainder later)
+            # Handle failure cases to maintain data integrity on resume:
+            # - If all batches failed: write empty marker to prevent infinite retries
+            # - If some batches failed: skip part write to allow retry on resume
+            # - If batch was truncated by --limit: skip part write to process remainder later
             if len(chunk_embeddings) == 0:
                 # Write an empty marker to prevent infinite retries of consistently failing chunks.
                 _atomic_write_empty_parquet_part(part_path)
@@ -491,7 +491,8 @@ def process_parquet_file(
                 # the remainder can be processed on subsequent runs without the limit.
                 print(
                     f"Batch truncated by --limit (processed {len(image_bytes_list)} of {original_batch_size} total). "
-                    f"Skipping part write to allow full batch processing on next run without limit."
+                    f"Skipping part write to allow full batch processing on next run without limit.",
+                    file=sys.stderr,
                 )
                 continue
 
