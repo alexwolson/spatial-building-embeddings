@@ -321,7 +321,7 @@ def process_parquet_file(
             "filter_valid": bool(filter_valid_effective),
         }
         for k, v in critical_params.items():
-            existing_value = state.get(k) if state is not None else None
+            existing_value = state.get(k)
             if existing_value != v:
                 raise ValueError(
                     f"Existing state.json is incompatible for key '{k}'.\n"
@@ -414,11 +414,7 @@ def process_parquet_file(
 
             if image_bytes_col is not None:
                 image_bytes_values = image_bytes_col.tolist()
-                if osmids_col is not None:
-                    osmids_values = osmids_col.tolist()
-                else:
-                    # Preserve behavior of row.get("OSMID") returning None when missing.
-                    osmids_values = [None] * len(image_bytes_values)
+                osmids_values = osmids_col.tolist() if osmids_col is not None else [None] * len(image_bytes_values)
 
                 for img_bytes, osmid in zip(image_bytes_values, osmids_values):
                     if img_bytes is not None and len(img_bytes) > 0:
