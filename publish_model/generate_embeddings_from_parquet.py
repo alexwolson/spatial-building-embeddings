@@ -427,6 +427,10 @@ def process_parquet_file(
                 continue
 
             # Respect --limit in terms of embeddings to produce.
+            # Track if the batch was truncated to avoid writing a part file that would
+            # prevent processing the remainder on subsequent runs without the limit.
+            original_batch_size = len(image_bytes_list)
+            batch_truncated_by_limit = False
             if limit is not None:
                 remaining = limit - produced
                 if remaining <= 0:
@@ -435,6 +439,7 @@ def process_parquet_file(
                 if len(image_bytes_list) > remaining:
                     image_bytes_list = image_bytes_list[:remaining]
                     osmids_list = osmids_list[:remaining]
+                    batch_truncated_by_limit = True
 
             # Run inference for this chunk in model batch sizes.
             chunk_embeddings: list[np.ndarray] = []
@@ -457,12 +462,36 @@ def process_parquet_file(
                     chunk_failures += 1
                     continue
 
+            # Handle failure cases to maintain data integrity on resume:
+            # - If all batches failed: write empty marker to prevent infinite retries
+            # - If some batches failed: skip part write to allow retry on resume
+            # - If batch was truncated by --limit: skip part write to process remainder later
             if len(chunk_embeddings) == 0:
                 # Write an empty marker to prevent infinite retries of consistently failing chunks.
                 _atomic_write_empty_parquet_part(part_path)
                 print(
                     f"Warning: all {chunk_failures} model batches failed for chunk. "
                     f"Wrote empty marker to prevent infinite retries: {part_path}",
+                    file=sys.stderr,
+                )
+                continue
+
+            if chunk_failures > 0:
+                # Some (but not all) batches failed. Don't write the part file so
+                # the entire chunk can be retried on resume to avoid data loss.
+                print(
+                    f"Warning: {chunk_failures} model batch(es) failed for chunk {part_path}. "
+                    f"Skipping part write to allow retry on resume.",
+                    file=sys.stderr,
+                )
+                continue
+
+            if batch_truncated_by_limit:
+                # Batch was truncated by --limit. Don't write the part file so
+                # the remainder can be processed on subsequent runs without the limit.
+                print(
+                    f"Batch truncated by --limit (processed {len(image_bytes_list)} of {original_batch_size} total). "
+                    f"Skipping part write to allow full batch processing on next run without limit.",
                     file=sys.stderr,
                 )
                 continue
