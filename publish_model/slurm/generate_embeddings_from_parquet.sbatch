@@ -146,9 +146,10 @@ echo "Output file: ${OUTPUT_FILE}"
 # The embedding script now writes a parquet *dataset directory* by default.
 # If OUTPUT_FILE exists as a file (e.g. legacy output), the script will write to a sidecar
 # directory named "<OUTPUT_FILE>.parts".
-OUTPUT_CHECK_PATH="${OUTPUT_FILE}"
-if [ -f "${OUTPUT_FILE}" ] && [ -d "${OUTPUT_FILE}.parts" ]; then
+if [ -d "${OUTPUT_FILE}.parts" ]; then
     OUTPUT_CHECK_PATH="${OUTPUT_FILE}.parts"
+else
+    OUTPUT_CHECK_PATH="${OUTPUT_FILE}"
 fi
 
 if [ ! -e "${OUTPUT_CHECK_PATH}" ]; then
