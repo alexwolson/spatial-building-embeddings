@@ -127,8 +127,8 @@ if [ -n "${LIMIT:-}" ]; then
     CMD_ARGS+=("--limit" "${LIMIT}")
 fi
 
-# Run the script
-python "${PROJECT_ROOT}/publish_model/generate_embeddings_from_parquet.py" "${CMD_ARGS[@]}"
+# Run the script (unbuffered for real-time log streaming)
+python -u "${PROJECT_ROOT}/publish_model/generate_embeddings_from_parquet.py" "${CMD_ARGS[@]}"
 
 EXIT_CODE=$?
 
@@ -142,12 +142,21 @@ fi
 echo "Processing completed successfully at $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Output file: ${OUTPUT_FILE}"
 
-# Step 9: Verify output file was created
-if [ ! -f "${OUTPUT_FILE}" ]; then
-    error_exit "Output file was not created: ${OUTPUT_FILE}"
+# Step 9: Verify output was created
+# The embedding script now writes a parquet *dataset directory* by default.
+# If OUTPUT_FILE exists as a file (e.g. legacy output), the script will write to a sidecar
+# directory named "<OUTPUT_FILE>.parts".
+if [ -d "${OUTPUT_FILE}.parts" ]; then
+    OUTPUT_CHECK_PATH="${OUTPUT_FILE}.parts"
+else
+    OUTPUT_CHECK_PATH="${OUTPUT_FILE}"
 fi
 
-OUTPUT_SIZE=$(du -h "${OUTPUT_FILE}" | cut -f1)
-echo "Output file size: ${OUTPUT_SIZE}"
+if [ ! -e "${OUTPUT_CHECK_PATH}" ]; then
+    error_exit "Output path was not created: ${OUTPUT_CHECK_PATH}"
+fi
+
+OUTPUT_SIZE=$(du -sh "${OUTPUT_CHECK_PATH}" | cut -f1)
+echo "Output size: ${OUTPUT_SIZE}"
 
 exit 0
