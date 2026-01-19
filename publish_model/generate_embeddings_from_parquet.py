@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -34,6 +35,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
 from PIL import Image
@@ -125,12 +127,131 @@ def generate_embeddings_batch(
     return embeddings_np
 
 
+def _atomic_write_parquet_part(
+    part_path: Path,
+    osmids: list[object],
+    embeddings: np.ndarray,
+) -> None:
+    """
+    Atomically write a parquet part file with columns: OSMID, embedding.
+    Embedding is stored as list<float32> per row.
+    """
+    part_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = part_path.with_name(part_path.name + ".tmp")
+
+    if embeddings.ndim != 2:
+        raise ValueError(f"Expected embeddings to be 2D array, got shape {embeddings.shape}")
+
+    if len(osmids) != embeddings.shape[0]:
+        raise ValueError(f"OSMID count ({len(osmids)}) != embeddings rows ({embeddings.shape[0]})")
+
+    # Ensure float32 for consistent parquet typing.
+    embeddings = embeddings.astype(np.float32, copy=False)
+    embedding_lists: list[list[float]] = embeddings.tolist()
+
+    table = pa.Table.from_arrays(
+        [
+            pa.array(osmids),
+            pa.array(embedding_lists, type=pa.list_(pa.float32())),
+        ],
+        names=["OSMID", "embedding"],
+    )
+
+    pq.write_table(table, tmp_path, compression="snappy")
+    os.replace(tmp_path, part_path)
+
+
+def _atomic_write_empty_parquet_part(part_path: Path) -> None:
+    """
+    Write an empty parquet part file to mark a chunk as processed.
+    This prevents re-processing empty chunks on resume.
+    """
+    part_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = part_path.with_name(part_path.name + ".tmp")
+    table = pa.Table.from_arrays(
+        [
+            pa.array([], type=pa.int64()),
+            pa.array([], type=pa.list_(pa.float32())),
+        ],
+        names=["OSMID", "embedding"],
+    )
+    pq.write_table(table, tmp_path, compression="snappy")
+    os.replace(tmp_path, part_path)
+
+
+def _read_json(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp_path, path)
+
+
+def _determine_output_dataset_dir(output_arg: Path) -> Path:
+    """
+    Determine where to write the parquet dataset directory.
+
+    - If output_arg is a directory (or does not yet exist), we write there.
+    - If a sidecar directory (<output>.parts) exists, we resume there.
+    - If output_arg exists as a file, we write/resume into the sidecar directory (<output>.parts)
+      to avoid clobbering the existing file.
+    """
+    sidecar_dir = Path(str(output_arg) + ".parts")
+
+    if output_arg.exists():
+        if output_arg.is_dir():
+            return output_arg
+        # Exists as a file: don't overwrite; use sidecar dir.
+        print(
+            f"Warning: output path exists as a file ({output_arg}). "
+            f"Writing/resuming parquet dataset in sidecar directory: {sidecar_dir}",
+            file=sys.stderr,
+        )
+        return sidecar_dir
+
+    if sidecar_dir.exists():
+        print(f"Found existing sidecar dataset directory, resuming: {sidecar_dir}", file=sys.stderr)
+        return sidecar_dir
+
+    return output_arg
+
+
+def _sum_existing_part_rows(parts_dir: Path) -> int:
+    if not parts_dir.exists():
+        return 0
+    total = 0
+    for part in sorted(parts_dir.glob("rg*_rb*.parquet")):
+        try:
+            total += pq.ParquetFile(part).metadata.num_rows
+        except Exception as e:
+            print(f"Warning: failed reading parquet metadata for {part}: {e}", file=sys.stderr)
+    return total
+
+
+def _infer_model_id_for_state(model: AutoModel, model_id_arg: str) -> str:
+    """
+    Prefer the explicit CLI/HF id for stability across sessions.
+    Some transformers models set name_or_path, but that may be a local cache path.
+    """
+    # CLI arg is the best user intent signal.
+    if model_id_arg:
+        return model_id_arg
+    return getattr(model, "name_or_path", "") or ""
+
+
 def process_parquet_file(
     input_path: Path,
     output_path: Path,
     model: AutoModel,
     processor: AutoImageProcessor,
     device: str,
+    model_id: str,
     batch_size: int = 32,
     limit: Optional[int] = None,
     filter_valid: bool = True,
@@ -151,120 +272,189 @@ def process_parquet_file(
         read_batch_size: Number of rows to read from parquet at a time
     """
     print(f"\nReading parquet file: {input_path}")
-    
+
+    if output_path.suffix == ".csv":
+        raise ValueError(
+            "CSV output is not supported for resumable incremental writes. "
+            "Please use a parquet output (dataset directory), e.g. --output embeddings.parquet"
+        )
+
+    # Determine output dataset directory and internal layout.
+    output_dataset_dir = _determine_output_dataset_dir(output_path)
+    parts_dir = output_dataset_dir / "parts"
+    state_path = output_dataset_dir / "state.json"
+
+    # Resume / compatibility checks.
+    filter_valid_effective = filter_valid
+    state: dict | None = None
+    model_id_for_state = _infer_model_id_for_state(model, model_id)
+    if state_path.exists():
+        state = _read_json(state_path)
+        # Basic safety to avoid mixing incompatible outputs.
+        expected = {
+            "input_path": str(input_path),
+            "model_id": model_id_for_state,
+            "batch_size": int(batch_size),
+            "read_batch_size": int(read_batch_size),
+            "filter_valid": bool(filter_valid_effective),
+        }
+        for k, v in expected.items():
+            if k in state and state[k] != v:
+                raise ValueError(
+                    f"Existing state.json is incompatible for key '{k}'.\n"
+                    f"Existing: {state.get(k)}\n"
+                    f"Current:  {v}\n"
+                    f"Refusing to mix outputs in {output_dataset_dir}."
+                )
+
     # Check total rows first
     parquet_file = pq.ParquetFile(input_path)
     total_rows = parquet_file.metadata.num_rows
+    num_row_groups = parquet_file.metadata.num_row_groups
+
     num_rows_to_process = limit if limit else total_rows
     num_rows_to_process = min(num_rows_to_process, total_rows)
-    
+
+    # Estimate already-produced embeddings by summing existing part row counts.
+    produced = _sum_existing_part_rows(parts_dir)
+
     print(f"Total rows in file: {total_rows}")
-    print(f"Rows to process: {num_rows_to_process}")
+    print(f"Rows to process (upper bound): {num_rows_to_process}")
+    print(f"Output dataset directory: {output_dataset_dir}")
+    print(f"Parts directory: {parts_dir}")
+    if produced > 0:
+        print(f"Resuming: detected {produced} embeddings already written")
 
-    # Process in batches
-    all_embeddings = []
-    all_osmids = []
-    processed = 0
+    if limit is not None and produced >= limit:
+        print(f"Limit {limit} already satisfied by existing output ({produced} embeddings). Exiting.")
+        return
 
-    # Read batches from parquet using iter_batches.
+    # Initialize / update state.
+    base_state = {
+        "input_path": str(input_path),
+        "output_dataset_dir": str(output_dataset_dir),
+        "model_id": model_id_for_state,
+        "device": device,
+        "batch_size": int(batch_size),
+        "read_batch_size": int(read_batch_size),
+        "filter_valid": bool(filter_valid_effective),
+        "total_rows_in_input": int(total_rows),
+        "num_row_groups": int(num_row_groups),
+    }
+    if state is None:
+        state = {**base_state, "embeddings_written": int(produced)}
+    else:
+        state.update(base_state)
+        state["embeddings_written"] = int(produced)
+    _atomic_write_json(state_path, state)
+
+    # Process row-group-by-row-group for deterministic part naming.
     # NOTE: Some pyarrow versions (e.g. older cluster modules) do not support
     # ParquetFile.iter_batches(use_pandas=True). To stay compatible, we always
     # iterate over Arrow RecordBatches and convert to pandas explicitly.
-    batch_iter = parquet_file.iter_batches(batch_size=read_batch_size)
-
-    for batch in batch_iter:
-        # `batch` is typically a pyarrow.RecordBatch
-        batch_df = batch.to_pandas()
-        if processed >= num_rows_to_process:
+    stop = False
+    for rg in range(num_row_groups):
+        if stop:
             break
-        
-        # Filter valid images if requested
-        if filter_valid and "is_valid" in batch_df.columns:
-            batch_df = batch_df[batch_df["is_valid"] == True]
-        
-        if len(batch_df) == 0:
-            continue
-        
-        # Limit rows if specified
-        remaining = num_rows_to_process - processed
-        if len(batch_df) > remaining:
-            batch_df = batch_df.head(remaining)
-        
-        # Extract image bytes and OSMIDs
-        image_batches = []
-        osmids_batch = []
-        
-        for idx, row in batch_df.iterrows():
-            image_bytes = row.get("image_bytes")
-            osmid = row.get("OSMID")
-            
-            if image_bytes is not None and len(image_bytes) > 0:
-                image_batches.append(image_bytes)
-                osmids_batch.append(osmid)
-        
-        # Process images in model batch size
-        for i in range(0, len(image_batches), batch_size):
-            batch_images = image_batches[i : i + batch_size]
-            batch_osmids = osmids_batch[i : i + batch_size]
-            
-            try:
-                embeddings = generate_embeddings_batch(batch_images, model, processor, device)
-                all_embeddings.append(embeddings)
-                all_osmids.extend(batch_osmids)
-                processed += len(batch_images)
-                
-                if processed % 100 == 0 or processed >= num_rows_to_process:
-                    print(f"Processed {processed}/{num_rows_to_process} images...")
-            except Exception as e:
-                print(f"Error processing batch: {e}", file=sys.stderr)
-                import traceback
-                traceback.print_exc()
-                # Continue with next batch
+
+        rb_idx = 0
+        for batch in parquet_file.iter_batches(batch_size=read_batch_size, row_groups=[rg]):
+            part_path = parts_dir / f"rg{rg:05d}_rb{rb_idx:05d}.parquet"
+            rb_idx += 1
+
+            # Skip deterministically if already written.
+            if part_path.exists():
                 continue
-        
-        if processed >= num_rows_to_process:
-            break
 
-    # Concatenate all embeddings
-    if len(all_embeddings) == 0:
+            if limit is not None and produced >= limit:
+                stop = True
+                break
+
+            batch_df = batch.to_pandas()
+
+            # Filter valid images if requested
+            if filter_valid_effective and "is_valid" in batch_df.columns:
+                batch_df = batch_df[batch_df["is_valid"] == True]
+
+            if len(batch_df) == 0:
+                _atomic_write_empty_parquet_part(part_path)
+                print(f"Wrote empty part (no rows after filtering): {part_path}")
+                continue
+
+            # Extract image bytes and OSMIDs
+            image_bytes_list: list[bytes] = []
+            osmids_list: list[object] = []
+
+            for _, row in batch_df.iterrows():
+                img_bytes = row.get("image_bytes")
+                osmid = row.get("OSMID")
+                if img_bytes is not None and len(img_bytes) > 0:
+                    image_bytes_list.append(img_bytes)
+                    osmids_list.append(osmid)
+
+            if len(image_bytes_list) == 0:
+                _atomic_write_empty_parquet_part(part_path)
+                print(f"Wrote empty part (no usable image_bytes): {part_path}")
+                continue
+
+            # Respect --limit in terms of embeddings to produce.
+            if limit is not None:
+                remaining = limit - produced
+                if remaining <= 0:
+                    stop = True
+                    break
+                if len(image_bytes_list) > remaining:
+                    image_bytes_list = image_bytes_list[:remaining]
+                    osmids_list = osmids_list[:remaining]
+
+            # Run inference for this chunk in model batch sizes.
+            chunk_embeddings: list[np.ndarray] = []
+            chunk_osmids: list[object] = []
+
+            for i in range(0, len(image_bytes_list), batch_size):
+                batch_images = image_bytes_list[i : i + batch_size]
+                batch_osmids = osmids_list[i : i + batch_size]
+                try:
+                    embs = generate_embeddings_batch(batch_images, model, processor, device)
+                    chunk_embeddings.append(embs)
+                    chunk_osmids.extend(batch_osmids)
+                    produced += len(batch_images)
+                except Exception as e:
+                    print(f"Error processing model batch in chunk {part_path}: {e}", file=sys.stderr)
+                    import traceback
+
+                    traceback.print_exc()
+                    continue
+
+            if len(chunk_embeddings) == 0:
+                # Do not mark as complete: allow reruns to retry this chunk.
+                # Errors are logged above and we proceed to the next chunk.
+                print(f"Warning: all model batches failed for chunk, will retry on rerun: {part_path}", file=sys.stderr)
+                continue
+
+            embeddings_array = np.concatenate(chunk_embeddings, axis=0)
+            _atomic_write_parquet_part(part_path, chunk_osmids, embeddings_array)
+
+            # Update state after each successful part write.
+            assert state is not None
+            state["embeddings_written"] = int(produced)
+            state["last_written_part"] = str(part_path)
+            _atomic_write_json(state_path, state)
+
+            if produced % 100 == 0 or (limit is not None and produced >= limit):
+                print(f"Embeddings written: {produced}/{num_rows_to_process} (upper bound)")
+            print(f"Wrote part: {part_path} ({embeddings_array.shape[0]} rows)")
+
+            if limit is not None and produced >= limit:
+                stop = True
+                break
+
+    if produced == 0:
         print("No embeddings generated!", file=sys.stderr)
         sys.exit(1)
-    
-    embeddings_array = np.concatenate(all_embeddings, axis=0)
-    print(f"\nGenerated {len(embeddings_array)} embeddings")
-    print(f"Embedding shape: {embeddings_array.shape}")
-    print(f"Mean embedding norm: {np.linalg.norm(embeddings_array, axis=1).mean():.4f}")
 
-    # Create output DataFrame
-    output_df = pd.DataFrame(
-        {
-            "OSMID": all_osmids,
-            "embedding": [emb for emb in embeddings_array],
-        }
-    )
-
-    # If embeddings should be stored as arrays in parquet, we need to convert
-    # Parquet supports arrays, so we can store as list
-    output_df["embedding"] = output_df["embedding"].apply(lambda x: x.tolist())
-
-    # Write output
-    print(f"\nWriting embeddings to: {output_path}")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    if output_path.suffix == ".parquet":
-        output_df.to_parquet(output_path, index=False, compression="snappy")
-    elif output_path.suffix == ".csv":
-        # For CSV, we might want to flatten or store differently
-        # Option 1: Store as space-separated values
-        output_df["embedding"] = output_df["embedding"].apply(lambda x: " ".join(map(str, x)))
-        output_df.to_csv(output_path, index=False)
-    else:
-        # Default to parquet
-        output_path = output_path.with_suffix(".parquet")
-        output_df.to_parquet(output_path, index=False, compression="snappy")
-        print(f"Changed output path to: {output_path}")
-
-    print(f"Done! Wrote {len(output_df)} embeddings to {output_path}")
+    print(f"\nDone! Embeddings written so far: {produced}")
+    print(f"Output dataset directory: {output_dataset_dir}")
 
 
 def main():
@@ -285,7 +475,9 @@ def main():
         "-o",
         type=Path,
         required=True,
-        help="Path to output file (.parquet or .csv)",
+        help="Path to output parquet dataset directory (e.g. embeddings.parquet). "
+        "If a file already exists at that path, output will be written to a sidecar "
+        "directory named '<output>.parts'.",
     )
     parser.add_argument(
         "--model-id",
@@ -348,6 +540,7 @@ def main():
             model=model,
             processor=processor,
             device=device,
+            model_id=args.model_id,
             batch_size=args.batch_size,
             limit=args.limit,
             filter_valid=not args.no_filter_valid,
