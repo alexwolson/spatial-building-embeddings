@@ -134,7 +134,7 @@ def _atomic_write_parquet_part(
 ) -> None:
     """
     Atomically write a parquet part file with columns: OSMID, embedding.
-    Embedding is stored as list<float32> per row.
+    Embedding is stored as a PyArrow list array with float32 elements per row.
     """
     part_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = part_path.with_name(part_path.name + ".tmp")
@@ -157,8 +157,15 @@ def _atomic_write_parquet_part(
         names=["OSMID", "embedding"],
     )
 
-    pq.write_table(table, tmp_path, compression="snappy")
-    os.replace(tmp_path, part_path)
+    try:
+        pq.write_table(table, tmp_path, compression="snappy")
+        os.replace(tmp_path, part_path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _atomic_write_empty_parquet_part(part_path: Path) -> None:
@@ -175,8 +182,15 @@ def _atomic_write_empty_parquet_part(part_path: Path) -> None:
         ],
         names=["OSMID", "embedding"],
     )
-    pq.write_table(table, tmp_path, compression="snappy")
-    os.replace(tmp_path, part_path)
+    try:
+        pq.write_table(table, tmp_path, compression="snappy")
+        os.replace(tmp_path, part_path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _read_json(path: Path) -> dict:
@@ -187,10 +201,17 @@ def _read_json(path: Path) -> dict:
 def _atomic_write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(path.name + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp_path, path)
+    try:
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _determine_output_dataset_dir(output_arg: Path) -> Path:
@@ -276,7 +297,8 @@ def process_parquet_file(
     if output_path.suffix == ".csv":
         raise ValueError(
             "CSV output is not supported for resumable incremental writes. "
-            "Please use a parquet output (dataset directory), e.g. --output embeddings.parquet"
+            "Please specify a parquet dataset directory path (e.g., --output embeddings.parquet). "
+            "The script will create a directory structure with multiple parquet part files."
         )
 
     # Determine output dataset directory and internal layout.
@@ -286,23 +308,24 @@ def process_parquet_file(
 
     # Resume / compatibility checks.
     filter_valid_effective = filter_valid
-    state: dict | None = None
+    state: Optional[dict] = None
     model_id_for_state = _infer_model_id_for_state(model, model_id)
     if state_path.exists():
         state = _read_json(state_path)
         # Basic safety to avoid mixing incompatible outputs.
-        expected = {
+        # Only check critical parameters that affect output correctness.
+        # Batch sizes can vary between runs without affecting correctness.
+        critical_params = {
             "input_path": str(input_path),
             "model_id": model_id_for_state,
-            "batch_size": int(batch_size),
-            "read_batch_size": int(read_batch_size),
             "filter_valid": bool(filter_valid_effective),
         }
-        for k, v in expected.items():
-            if k in state and state[k] != v:
+        for k, v in critical_params.items():
+            existing_value = state.get(k) if state is not None else None
+            if k in state and existing_value != v:
                 raise ValueError(
                     f"Existing state.json is incompatible for key '{k}'.\n"
-                    f"Existing: {state.get(k)}\n"
+                    f"Existing: {existing_value}\n"
                     f"Current:  {v}\n"
                     f"Refusing to mix outputs in {output_dataset_dir}."
                 )
@@ -374,7 +397,7 @@ def process_parquet_file(
 
             # Filter valid images if requested
             if filter_valid_effective and "is_valid" in batch_df.columns:
-                batch_df = batch_df[batch_df["is_valid"] == True]
+                batch_df = batch_df[batch_df["is_valid"]]
 
             if len(batch_df) == 0:
                 _atomic_write_empty_parquet_part(part_path)
@@ -385,12 +408,22 @@ def process_parquet_file(
             image_bytes_list: list[bytes] = []
             osmids_list: list[object] = []
 
-            for _, row in batch_df.iterrows():
-                img_bytes = row.get("image_bytes")
-                osmid = row.get("OSMID")
-                if img_bytes is not None and len(img_bytes) > 0:
-                    image_bytes_list.append(img_bytes)
-                    osmids_list.append(osmid)
+            # Access columns directly instead of using iterrows() for better performance.
+            image_bytes_col = batch_df.get("image_bytes")
+            osmids_col = batch_df.get("OSMID")
+
+            if image_bytes_col is not None:
+                image_bytes_values = image_bytes_col.tolist()
+                if osmids_col is not None:
+                    osmids_values = osmids_col.tolist()
+                else:
+                    # Preserve behavior of row.get("OSMID") returning None when missing.
+                    osmids_values = [None] * len(image_bytes_values)
+
+                for img_bytes, osmid in zip(image_bytes_values, osmids_values):
+                    if img_bytes is not None and len(img_bytes) > 0:
+                        image_bytes_list.append(img_bytes)
+                        osmids_list.append(osmid)
 
             if len(image_bytes_list) == 0:
                 _atomic_write_empty_parquet_part(part_path)
@@ -410,6 +443,7 @@ def process_parquet_file(
             # Run inference for this chunk in model batch sizes.
             chunk_embeddings: list[np.ndarray] = []
             chunk_osmids: list[object] = []
+            chunk_failures = 0
 
             for i in range(0, len(image_bytes_list), batch_size):
                 batch_images = image_bytes_list[i : i + batch_size]
@@ -424,22 +458,31 @@ def process_parquet_file(
                     import traceback
 
                     traceback.print_exc()
+                    chunk_failures += 1
                     continue
 
             if len(chunk_embeddings) == 0:
-                # Do not mark as complete: allow reruns to retry this chunk.
-                # Errors are logged above and we proceed to the next chunk.
-                print(f"Warning: all model batches failed for chunk, will retry on rerun: {part_path}", file=sys.stderr)
+                # Write an empty marker to prevent infinite retries of consistently failing chunks.
+                _atomic_write_empty_parquet_part(part_path)
+                print(
+                    f"Warning: all {chunk_failures} model batches failed for chunk. "
+                    f"Wrote empty marker to prevent infinite retries: {part_path}",
+                    file=sys.stderr,
+                )
                 continue
 
             embeddings_array = np.concatenate(chunk_embeddings, axis=0)
             _atomic_write_parquet_part(part_path, chunk_osmids, embeddings_array)
 
             # Update state after each successful part write.
+            # Only update the changing values to reduce I/O overhead.
             assert state is not None
-            state["embeddings_written"] = int(produced)
-            state["last_written_part"] = str(part_path)
-            _atomic_write_json(state_path, state)
+            state_update = {
+                **state,
+                "embeddings_written": int(produced),
+                "last_written_part": str(part_path),
+            }
+            _atomic_write_json(state_path, state_update)
 
             if produced % 100 == 0 or (limit is not None and produced >= limit):
                 print(f"Embeddings written: {produced}/{num_rows_to_process} (upper bound)")
