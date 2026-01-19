@@ -166,11 +166,15 @@ def process_parquet_file(
     all_osmids = []
     processed = 0
 
-    # Read batches from parquet using iter_batches
-    # With use_pandas=True, iter_batches returns pandas DataFrames directly
-    batch_iter = parquet_file.iter_batches(batch_size=read_batch_size, use_pandas=True)
-    
-    for batch_df in batch_iter:
+    # Read batches from parquet using iter_batches.
+    # NOTE: Some pyarrow versions (e.g. older cluster modules) do not support
+    # ParquetFile.iter_batches(use_pandas=True). To stay compatible, we always
+    # iterate over Arrow RecordBatches and convert to pandas explicitly.
+    batch_iter = parquet_file.iter_batches(batch_size=read_batch_size)
+
+    for batch in batch_iter:
+        # `batch` is typically a pyarrow.RecordBatch
+        batch_df = batch.to_pandas()
         if processed >= num_rows_to_process:
             break
         
