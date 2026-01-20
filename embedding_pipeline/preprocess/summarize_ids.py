@@ -10,7 +10,6 @@ from typing import Dict, Iterable, Tuple
 import pandas as pd
 import pyarrow.parquet as pq
 
-
 logger = logging.getLogger(__name__)
 
 

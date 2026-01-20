@@ -19,10 +19,10 @@ The unified config file structure:
 Workflows automatically read from the relevant sections based on their needs.
 """
 
+import tomllib
 from pathlib import Path
 from typing import Literal, Union
 
-import tomllib
 from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -54,7 +54,8 @@ class ProcessTarConfig(BaseSettings):
 
     tar_file: Path = Field(..., description="Path to tar file to process")
     intermediates_dir: Path = Field(
-        ..., description="Output directory for intermediate Parquet files (shared pipeline location)"
+        ...,
+        description="Output directory for intermediate Parquet files (shared pipeline location)",
     )
     log_file: Path | None = Field(None, description="Optional log file path")
     temp_dir: Path | None = Field(
@@ -78,7 +79,8 @@ class MergeAndSplitConfig(BaseSettings):
         ..., description="Directory containing intermediate Parquet files"
     )
     merged_dir: Path = Field(
-        ..., description="Directory for final output Parquet files (shared pipeline location)"
+        ...,
+        description="Directory for final output Parquet files (shared pipeline location)",
     )
     embeddings_dir: Path = Field(
         ..., description="Directory containing per-tar embedding Parquet files"
@@ -118,7 +120,8 @@ class GenerateEmbeddingsConfig(BaseSettings):
         None, description="Optional: tar file path (auto-detect if None)"
     )
     embeddings_dir: Path = Field(
-        ..., description="Output directory for embedding parquet files (shared pipeline location)"
+        ...,
+        description="Output directory for embedding parquet files (shared pipeline location)",
     )
     model_name: str = Field(
         "vit_base_patch14_dinov2.lvd142m", description="Timm model name"
@@ -171,7 +174,7 @@ class GenerateEmbeddingsConfig(BaseSettings):
         tar_file_raw = raw_dir / f"{dataset_id:04d}.tar"
         if tar_file_raw.exists():
             return tar_file_raw
-            
+
         # Try raw/dataset_unaligned/ directory (another common structure)
         # Assuming structure: data/intermediates/0061.parquet -> data/raw/dataset_unaligned/0061.tar
         raw_unaligned_dir = raw_dir / "dataset_unaligned"
@@ -187,9 +190,15 @@ class GenerateEmbeddingsConfig(BaseSettings):
                 tar_file_project = current / "data" / "raw" / f"{dataset_id:04d}.tar"
                 if tar_file_project.exists():
                     return tar_file_project
-                
+
                 # Check data/raw/dataset_unaligned/ from project root
-                tar_file_project_unaligned = current / "data" / "raw" / "dataset_unaligned" / f"{dataset_id:04d}.tar"
+                tar_file_project_unaligned = (
+                    current
+                    / "data"
+                    / "raw"
+                    / "dataset_unaligned"
+                    / f"{dataset_id:04d}.tar"
+                )
                 if tar_file_project_unaligned.exists():
                     return tar_file_project_unaligned
 
@@ -219,7 +228,8 @@ class ComputeFingerprintsConfig(BaseSettings):
         None, description="Optional: tar file path (auto-detect if None)"
     )
     fingerprints_dir: Path = Field(
-        ..., description="Output directory for fingerprint parquet files (shared pipeline location)"
+        ...,
+        description="Output directory for fingerprint parquet files (shared pipeline location)",
     )
     image_size: int = Field(
         16, description="Size of the square fingerprint image (e.g., 16x16)"
@@ -265,8 +275,14 @@ class ComputeFingerprintsConfig(BaseSettings):
                 tar_file_project = current / "data" / "raw" / f"{dataset_id:04d}.tar"
                 if tar_file_project.exists():
                     return tar_file_project
-                
-                tar_file_project_unaligned = current / "data" / "raw" / "dataset_unaligned" / f"{dataset_id:04d}.tar"
+
+                tar_file_project_unaligned = (
+                    current
+                    / "data"
+                    / "raw"
+                    / "dataset_unaligned"
+                    / f"{dataset_id:04d}.tar"
+                )
                 if tar_file_project_unaligned.exists():
                     return tar_file_project_unaligned
             if current.parent == current:
@@ -456,7 +472,6 @@ class TripletTrainingConfig(BaseSettings):
     )
 
 
-
 class DifficultyMetadataConfig(BaseSettings):
     """Configuration for building difficulty metadata generation."""
 
@@ -579,7 +594,7 @@ def load_config_from_file(
 
     # Build merged data by flattening relevant sections
     merged_data = {}
-    
+
     # Add global settings
     if global_config.seed is not None:
         merged_data["seed"] = global_config.seed
@@ -619,7 +634,9 @@ def load_config_from_file(
 
     # Convert retrieval_metric_top_k to tuple if present
     if "retrieval_metric_top_k" in merged_data:
-        merged_data["retrieval_metric_top_k"] = tuple(merged_data["retrieval_metric_top_k"])
+        merged_data["retrieval_metric_top_k"] = tuple(
+            merged_data["retrieval_metric_top_k"]
+        )
 
     # Instantiate the appropriate config class
     config_classes = {

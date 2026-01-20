@@ -8,13 +8,11 @@ version = "0.2.0"
 description = "Unified pipeline for preprocessing, embedding generation, difficulty banding, and triplet training of spatial building datasets."
 requires-python = ">=3.11,<3.12"
 dependencies = [
-    "black>=25.11.0",
     "einops>=0.8.0",
     "huggingface-hub>=0.36.0",
     "optuna>=4.6.0",
     "pandas>=2.3.3",
     "pillow>=12.0.0",
-    "pyarrow>=22.0.0",
     "pydantic>=2.12.4",
     "pydantic-settings>=2.12.0",
     "rich>=14.2.0",
@@ -25,8 +23,34 @@ dependencies = [
     "wandb>=0.23.0",
 ]
 
+[project.optional-dependencies]
+# Dev-only tooling (not required to run the pipeline)
+dev = [
+    "black>=25.11.0",
+    "ruff>=0.13.0",
+]
+
+# Optional: local PyArrow install (clusters may provide Arrow/PyArrow via modules)
+arrow = [
+    "pyarrow>=22.0.0",
+]
+
 [tool.setuptools]
 # Exclude utility directories from package discovery
 # These are scripts/tools, not installable packages
 packages = []
 
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["embedding_pipeline", "config"]

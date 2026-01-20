@@ -6,20 +6,19 @@ This script demonstrates how to load the model from HuggingFace Hub and generate
 
 Usage:
     # Single image
-    python publish_model/generate_embeddings_from_hf.py path/to/image.jpg
+    uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf path/to/image.jpg
 
     # Multiple images
-    python publish_model/generate_embeddings_from_hf.py image1.jpg image2.jpg image3.jpg
+    uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image1.jpg image2.jpg image3.jpg
 
     # Using custom model ID
-    MODEL_ID="custom/org/model-name" python publish_model/generate_embeddings_from_hf.py image.jpg
+    MODEL_ID="custom/org/model-name" uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image.jpg
 
     # Save embeddings to file (numpy .npy format)
-    python publish_model/generate_embeddings_from_hf.py image.jpg --output embeddings.npy
+    uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image.jpg --output embeddings.npy
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -30,7 +29,9 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 
 
-def load_model_from_hub(model_id: str, device: Optional[str] = None) -> tuple[AutoModel, AutoImageProcessor]:
+def load_model_from_hub(
+    model_id: str, device: Optional[str] = None
+) -> tuple[AutoModel, AutoImageProcessor]:
     """
     Load the Spatial Building Embeddings model and processor from HuggingFace Hub.
 
@@ -149,7 +150,9 @@ def generate_embeddings_batch(
             embeddings_np = embeddings.cpu().numpy()
             all_embeddings.append(embeddings_np)
 
-        print(f"Processed {min(i + batch_size, len(image_paths))}/{len(image_paths)} images...")
+        print(
+            f"Processed {min(i + batch_size, len(image_paths))}/{len(image_paths)} images..."
+        )
 
     # Concatenate all batches
     all_embeddings = np.concatenate(all_embeddings, axis=0)
@@ -213,8 +216,14 @@ def main():
         model, processor = load_model_from_hub(args.model_id, device=device)
     except Exception as e:
         print(f"Error loading model: {e}", file=sys.stderr)
-        print("\nTip: Make sure you have internet connection and the model ID is correct.", file=sys.stderr)
-        print("For gated models, ensure HF_TOKEN environment variable is set.", file=sys.stderr)
+        print(
+            "\nTip: Make sure you have internet connection and the model ID is correct.",
+            file=sys.stderr,
+        )
+        print(
+            "For gated models, ensure HF_TOKEN environment variable is set.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Generate embeddings
@@ -228,7 +237,9 @@ def main():
     else:
         # Multiple images
         print(f"\nGenerating embeddings for {len(args.images)} images...")
-        embeddings = generate_embeddings_batch(args.images, model, processor, device, args.batch_size)
+        embeddings = generate_embeddings_batch(
+            args.images, model, processor, device, args.batch_size
+        )
         print(f"Embeddings shape: {embeddings.shape}")
         print(f"Mean embedding norm: {np.linalg.norm(embeddings, axis=1).mean():.4f}")
 

@@ -1,8 +1,9 @@
+import logging
+from typing import Literal
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Literal
-import logging
 
 logger = logging.getLogger(__name__)
 

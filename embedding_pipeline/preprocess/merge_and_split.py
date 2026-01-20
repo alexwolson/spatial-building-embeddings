@@ -31,15 +31,14 @@ import pyarrow.parquet as pq
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
 
 from config import MergeAndSplitConfig, load_config_from_file
-
 
 # Global registry to track file handles for proper cleanup
 _log_file_handles: list[tuple[logging.Handler, typing.TextIO]] = []
@@ -90,13 +89,15 @@ def setup_logging(log_file: Path | None = None) -> logging.Logger:
         for reg_handler, file_handle in _log_file_handles:
             if reg_handler is handler:
                 _close_file_handle(file_handle, during_exit=False)
-        
+
         # Remove all entries for this handler from the registry
-        _log_file_handles[:] = [(h, f) for h, f in _log_file_handles if h is not handler]
-        
+        _log_file_handles[:] = [
+            (h, f) for h, f in _log_file_handles if h is not handler
+        ]
+
         # Close the handler itself
         _close_handler(handler, during_exit=False)
-    
+
     logger.handlers.clear()
 
     # Create Rich handler
@@ -135,7 +136,7 @@ def _enrich_batch_identifiers(
 ) -> pd.DataFrame:
     """
     Enrich a batch DataFrame with building_id and streetview_image_id.
-    
+
     This is a streaming-friendly version that works on batches.
     """
     # Ensure dataset_id exists (simplified version for batches)
@@ -165,7 +166,7 @@ def _enrich_batch_identifiers(
                 f"dataset_id contains non-numeric/NA values (examples: {sample})."
             )
         batch_df["dataset_id"] = coerced.astype("Int64")
-    
+
     # Ensure building_id and streetview_image_id
     required_columns = {"dataset_id", "target_id", "patch_id"}
     missing = required_columns - set(batch_df.columns)
@@ -173,18 +174,18 @@ def _enrich_batch_identifiers(
         raise ValueError(
             f"Missing required columns for composite identifiers: {', '.join(sorted(missing))}"
         )
-    
+
     enriched_df = batch_df.copy()
-    
+
     dataset_str = enriched_df["dataset_id"].astype("Int64").astype(str).str.zfill(4)
     target_str = enriched_df["target_id"].astype(int).astype(str)
     patch_str = enriched_df["patch_id"].astype(int).astype(str)
-    
+
     if "building_id" not in enriched_df.columns:
         enriched_df["building_id"] = dataset_str + "_" + target_str
     if "streetview_image_id" not in enriched_df.columns:
         enriched_df["streetview_image_id"] = dataset_str + "_" + patch_str
-    
+
     return enriched_df
 
 
@@ -362,21 +363,21 @@ def pass1_compute_metadata(
 ) -> tuple[set[str], dict[str, str], int]:
     """
     Pass 1: Stream identifier columns to compute building counts and split mapping.
-    
+
     Returns:
         - singleton_building_ids: Set of building_ids to filter out
         - building_id_to_split: Mapping from building_id to split name
         - total_building_ids: Total number of unique building_ids (before filtering)
     """
     logger.info("Pass 1: Computing building counts and split assignments...")
-    
+
     # Columns needed for pass 1 (excluding embedding to save memory)
     identifier_columns = [
         "dataset_id",
         "target_id",
         "patch_id",
     ]
-    
+
     # Check which columns exist in the dataset
     schema = dataset.schema
     available_columns = set(schema.names)
@@ -388,21 +389,21 @@ def pass1_compute_metadata(
             "Ensure dataset_id, target_id, and patch_id are present in embedding parquet files."
         )
     needed_columns = identifier_columns
-    
+
     # Stream batches and collect building_id counts
     building_id_counts: Counter[str] = Counter()
     total_rows = 0
-    
+
     task = progress.add_task("Pass 1: Streaming identifiers...", total=None)
-    
+
     scanner = dataset.scanner(columns=needed_columns)
     for batch in scanner.to_batches():
         batch_df = batch.to_pandas()
         total_rows += len(batch_df)
-        
+
         # Enrich with identifiers
         batch_df = _enrich_batch_identifiers(batch_df, logger)
-        
+
         # Count building_ids
         if "building_id" in batch_df.columns:
             building_id_counts.update(batch_df["building_id"].tolist())
@@ -411,46 +412,46 @@ def pass1_compute_metadata(
                 "building_id not found after enrichment. "
                 "Ensure dataset_id, target_id, and patch_id are present."
             )
-        
+
         progress.update(task, advance=len(batch_df))
-    
+
     # Identify singleton building_ids
     singleton_building_ids = {
         bid for bid, count in building_id_counts.items() if count == 1
     }
     total_building_ids = len(building_id_counts)
-    
+
     # Get unique building_ids (excluding singletons) for split assignment
     non_singleton_building_ids = {
         bid for bid in building_id_counts.keys() if bid not in singleton_building_ids
     }
-    
+
     logger.info(
         f"Pass 1 complete: {total_rows:,} rows, {total_building_ids:,} unique building_ids, "
         f"{len(singleton_building_ids):,} singletons"
     )
-    
+
     # Create deterministic split assignment for building_ids
     unique_building_ids_list = sorted(non_singleton_building_ids)
     n_keys = len(unique_building_ids_list)
-    
+
     logger.info(f"Splitting {n_keys:,} unique building_ids")
     logger.info(
         f"Ratios: train={train_ratio:.1%}, val={val_ratio:.1%}, test={test_ratio:.1%}"
     )
-    
+
     # Shuffle keys deterministically
     rng = np.random.default_rng(seed)
     shuffled_building_ids = rng.permutation(unique_building_ids_list)
-    
+
     # Calculate split boundaries
     n_train = int(n_keys * train_ratio)
     n_val = int(n_keys * val_ratio)
-    
+
     train_keys = set(shuffled_building_ids[:n_train])
     val_keys = set(shuffled_building_ids[n_train : n_train + n_val])
     # test_keys are the remainder
-    
+
     # Create mapping
     building_id_to_split: dict[str, str] = {}
     for building_id in train_keys:
@@ -459,7 +460,7 @@ def pass1_compute_metadata(
         building_id_to_split[building_id] = "val"
     for building_id in shuffled_building_ids[n_train + n_val :]:
         building_id_to_split[building_id] = "test"
-    
+
     return singleton_building_ids, building_id_to_split, total_building_ids
 
 
@@ -474,20 +475,20 @@ def pass2_stream_and_write(
 ) -> dict[str, int]:
     """
     Pass 2: Stream full data in batches, filter singletons, assign splits, write incrementally.
-    
+
     Returns statistics dictionary.
     """
     logger.info("Pass 2: Streaming full data and writing splits...")
-    
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Initialize Parquet writers for each split
     split_writers: dict[str, pq.ParquetWriter | None] = {
         "train": None,
         "val": None,
         "test": None,
     }
-    
+
     # Track statistics
     stats = {
         "total_rows_read": 0,
@@ -496,16 +497,16 @@ def pass2_stream_and_write(
         "val_entries": 0,
         "test_entries": 0,
     }
-    
+
     # Infer schema once before starting batch processing to ensure consistency
     split_schemas: dict[str, pa.Schema | None] = {
         "train": None,
         "val": None,
         "test": None,
     }
-    
+
     task = progress.add_task("Pass 2: Processing batches...", total=None)
-    
+
     try:
         # Stream batches
         scanner = dataset.scanner(batch_size=batch_size)
@@ -513,14 +514,16 @@ def pass2_stream_and_write(
             batch_df = batch.to_pandas()
             rows_in_batch = len(batch_df)
             stats["total_rows_read"] += rows_in_batch
-            
+
             # Enrich with identifiers
             batch_df = _enrich_batch_identifiers(batch_df, logger)
-            
+
             # Filter singleton buildings
             if "building_id" in batch_df.columns:
                 before_filter = len(batch_df)
-                batch_df = batch_df[~batch_df["building_id"].isin(singleton_building_ids)]
+                batch_df = batch_df[
+                    ~batch_df["building_id"].isin(singleton_building_ids)
+                ]
                 after_filter = len(batch_df)
                 filtered_out = before_filter - after_filter
                 stats["rows_after_filtering"] += after_filter
@@ -533,7 +536,7 @@ def pass2_stream_and_write(
                     )
             else:
                 stats["rows_after_filtering"] += len(batch_df)
-            
+
             # Assign splits based on building_id
             if "building_id" in batch_df.columns:
                 batch_df["split"] = batch_df["building_id"].map(
@@ -542,30 +545,31 @@ def pass2_stream_and_write(
             else:
                 logger.warning("building_id not found, assigning all to test")
                 batch_df["split"] = "test"
-            
+
             # Drop columns not needed in final files (but keep split for now)
             columns_to_drop = ["tar_file", "image_path"]
-            batch_df_clean = batch_df.drop(columns=[c for c in columns_to_drop if c in batch_df.columns])
-            
+            batch_df_clean = batch_df.drop(
+                columns=[c for c in columns_to_drop if c in batch_df.columns]
+            )
+
             # Write to appropriate split files
             for split_name in ["train", "val", "test"]:
                 split_batch = batch_df_clean[batch_df_clean["split"] == split_name]
                 if len(split_batch) == 0:
                     continue
-                
+
                 # Drop split column before writing
-                split_batch_final = (
-                    split_batch.drop(columns=["split"], errors="ignore")
-                    .reset_index(drop=True)
-                )
-                
+                split_batch_final = split_batch.drop(
+                    columns=["split"], errors="ignore"
+                ).reset_index(drop=True)
+
                 # Initialize schema and writer if needed
                 if split_schemas[split_name] is None:
                     # Infer schema from first batch for this split, without index
                     split_schemas[split_name] = pa.Schema.from_pandas(
                         split_batch_final, preserve_index=False
                     )
-                
+
                 if split_writers[split_name] is None:
                     output_file = output_dir / f"{split_name}.parquet"
                     split_writers[split_name] = pq.ParquetWriter(
@@ -573,7 +577,7 @@ def pass2_stream_and_write(
                         split_schemas[split_name],
                         compression="snappy",
                     )
-                
+
                 # Convert to Arrow table and write using the consistent schema
                 split_table = pa.Table.from_pandas(
                     split_batch_final,
@@ -581,12 +585,12 @@ def pass2_stream_and_write(
                     schema=split_schemas[split_name],
                 )
                 split_writers[split_name].write_table(split_table)
-                
+
                 stats[f"{split_name}_entries"] += len(split_batch)
-            
+
             # Update progress based on original input rows read
             progress.update(task, advance=rows_in_batch)
-        
+
         # Close all writers
         for split_name, writer in split_writers.items():
             if writer is not None:
@@ -597,14 +601,14 @@ def pass2_stream_and_write(
                     f"Wrote {split_name}.parquet: {stats[f'{split_name}_entries']:,} entries, "
                     f"{file_size_mb:.1f} MB"
                 )
-    
+
     except Exception:
         # Close writers on error
         for writer in split_writers.values():
             if writer is not None:
                 writer.close()
         raise
-    
+
     return stats
 
 
@@ -621,7 +625,7 @@ def merge_and_split(
 ) -> dict[str, int]:
     """
     Merge intermediate Parquet files, filter singletons, create splits, and write final files.
-    
+
     Uses a two-pass streaming approach to avoid loading all data into memory:
     - Pass 1: Stream identifier columns to compute building counts and split mapping
     - Pass 2: Stream full data in batches, filter singletons, assign splits, write incrementally
@@ -669,7 +673,7 @@ def merge_and_split(
         format="parquet",
         schema=None,  # Auto-detect schema
     )
-    
+
     # Verify embedding column exists
     schema = dataset.schema
     if "embedding" not in schema.names:

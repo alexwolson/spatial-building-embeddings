@@ -102,7 +102,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python "${PROJECT_ROOT}/embedding_pipeline/preprocess/process_tar.py" \
+python -m embedding_pipeline.preprocess.process_tar \
     --config "${BASE_CONFIG}" \
     --tar-file "${TAR_FILE}" \
     --temp-dir "${EXTRACT_DIR}"

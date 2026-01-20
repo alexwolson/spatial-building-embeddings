@@ -9,18 +9,18 @@ parquet file or CSV.
 
 Usage:
     # Generate embeddings and save to new parquet file
-    uv run python publish_model/generate_embeddings_from_parquet.py \\
+    uv run python -m embedding_pipeline.publish.generate_embeddings_from_parquet \\
         --input /Volumes/Data/north_america_building_sampler/artifacts/packaged_images.parquet \\
         --output embeddings.parquet
 
     # Generate embeddings for first 100 images only
-    uv run python publish_model/generate_embeddings_from_parquet.py \\
+    uv run python -m embedding_pipeline.publish.generate_embeddings_from_parquet \\
         --input packaged_images.parquet \\
         --output embeddings.parquet \\
         --limit 100
 
     # Use custom model ID
-    MODEL_ID="custom/org/model-name" uv run python publish_model/generate_embeddings_from_parquet.py \\
+    MODEL_ID="custom/org/model-name" uv run python -m embedding_pipeline.publish.generate_embeddings_from_parquet \\
         --input packaged_images.parquet \\
         --output embeddings.parquet
 """
@@ -34,7 +34,6 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
@@ -42,7 +41,9 @@ from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 
 
-def load_model_from_hub(model_id: str, device: Optional[str] = None) -> tuple[AutoModel, AutoImageProcessor]:
+def load_model_from_hub(
+    model_id: str, device: Optional[str] = None
+) -> tuple[AutoModel, AutoImageProcessor]:
     """
     Load the Spatial Building Embeddings model and processor from HuggingFace Hub.
 
@@ -140,10 +141,14 @@ def _atomic_write_parquet_part(
     tmp_path = part_path.with_name(part_path.name + ".tmp")
 
     if embeddings.ndim != 2:
-        raise ValueError(f"Expected embeddings to be 2D array, got shape {embeddings.shape}")
+        raise ValueError(
+            f"Expected embeddings to be 2D array, got shape {embeddings.shape}"
+        )
 
     if len(osmids) != embeddings.shape[0]:
-        raise ValueError(f"OSMID count ({len(osmids)}) != embeddings rows ({embeddings.shape[0]})")
+        raise ValueError(
+            f"OSMID count ({len(osmids)}) != embeddings rows ({embeddings.shape[0]})"
+        )
 
     # Ensure float32 for consistent parquet typing.
     embeddings = embeddings.astype(np.float32, copy=False)
@@ -237,7 +242,10 @@ def _determine_output_dataset_dir(output_arg: Path) -> Path:
         return sidecar_dir
 
     if sidecar_dir.exists():
-        print(f"Found existing sidecar dataset directory, resuming: {sidecar_dir}", file=sys.stderr)
+        print(
+            f"Found existing sidecar dataset directory, resuming: {sidecar_dir}",
+            file=sys.stderr,
+        )
         return sidecar_dir
 
     return output_arg
@@ -251,7 +259,10 @@ def _sum_existing_part_rows(parts_dir: Path) -> int:
         try:
             total += pq.ParquetFile(part).metadata.num_rows
         except Exception as e:
-            print(f"Warning: failed reading parquet metadata for {part}: {e}", file=sys.stderr)
+            print(
+                f"Warning: failed reading parquet metadata for {part}: {e}",
+                file=sys.stderr,
+            )
     return total
 
 
@@ -349,7 +360,9 @@ def process_parquet_file(
         print(f"Resuming: detected {produced} embeddings already written")
 
     if limit is not None and produced >= limit:
-        print(f"Limit {limit} already satisfied by existing output ({produced} embeddings). Exiting.")
+        print(
+            f"Limit {limit} already satisfied by existing output ({produced} embeddings). Exiting."
+        )
         return
 
     # Initialize / update state.
@@ -381,7 +394,9 @@ def process_parquet_file(
             break
 
         rb_idx = 0
-        for batch in parquet_file.iter_batches(batch_size=read_batch_size, row_groups=[rg]):
+        for batch in parquet_file.iter_batches(
+            batch_size=read_batch_size, row_groups=[rg]
+        ):
             part_path = parts_dir / f"rg{rg:05d}_rb{rb_idx:05d}.parquet"
             rb_idx += 1
 
@@ -414,7 +429,11 @@ def process_parquet_file(
 
             if image_bytes_col is not None:
                 image_bytes_values = image_bytes_col.tolist()
-                osmids_values = osmids_col.tolist() if osmids_col is not None else [None] * len(image_bytes_values)
+                osmids_values = (
+                    osmids_col.tolist()
+                    if osmids_col is not None
+                    else [None] * len(image_bytes_values)
+                )
 
                 for img_bytes, osmid in zip(image_bytes_values, osmids_values):
                     if img_bytes is not None and len(img_bytes) > 0:
@@ -450,12 +469,17 @@ def process_parquet_file(
                 batch_images = image_bytes_list[i : i + batch_size]
                 batch_osmids = osmids_list[i : i + batch_size]
                 try:
-                    embs = generate_embeddings_batch(batch_images, model, processor, device)
+                    embs = generate_embeddings_batch(
+                        batch_images, model, processor, device
+                    )
                     chunk_embeddings.append(embs)
                     chunk_osmids.extend(batch_osmids)
                     produced += len(batch_images)
                 except Exception as e:
-                    print(f"Error processing model batch in chunk {part_path}: {e}", file=sys.stderr)
+                    print(
+                        f"Error processing model batch in chunk {part_path}: {e}",
+                        file=sys.stderr,
+                    )
                     import traceback
 
                     traceback.print_exc()
@@ -506,7 +530,9 @@ def process_parquet_file(
             _atomic_write_json(state_path, state)
 
             if produced % 100 == 0 or (limit is not None and produced >= limit):
-                print(f"Embeddings written: {produced}/{num_rows_to_process} (upper bound)")
+                print(
+                    f"Embeddings written: {produced}/{num_rows_to_process} (upper bound)"
+                )
             print(f"Wrote part: {part_path} ({embeddings_array.shape[0]} rows)")
 
             if limit is not None and produced >= limit:
@@ -592,8 +618,14 @@ def main():
         model, processor = load_model_from_hub(args.model_id, device=device)
     except Exception as e:
         print(f"Error loading model: {e}", file=sys.stderr)
-        print("\nTip: Make sure you have internet connection and the model ID is correct.", file=sys.stderr)
-        print("For gated models, ensure HF_TOKEN environment variable is set.", file=sys.stderr)
+        print(
+            "\nTip: Make sure you have internet connection and the model ID is correct.",
+            file=sys.stderr,
+        )
+        print(
+            "For gated models, ensure HF_TOKEN environment variable is set.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Process parquet file
@@ -612,6 +644,7 @@ def main():
     except Exception as e:
         print(f"Error processing parquet file: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

@@ -8,9 +8,9 @@
 #   --account <ACCOUNT>         SLURM account name (required or use SLURM_ACCOUNT)
 #   --study-name <NAME>         Optuna study name (default: triplet_tuning)
 #   --storage-url <URL>         Optuna storage URL. Overrides --storage-path if set.
-#   --storage-path <PATH>       Path to SQLite database (default: <project>/train_specialized_embeddings/optuna/optuna.db)
+#   --storage-path <PATH>       Path to SQLite database (default: <project>/embedding_pipeline/train/optuna/optuna.db)
 #   --base-config <PATH>        Base training TOML config (default: config.toml)
-#   --trial-output-root <PATH>  Directory for per-trial artefacts (default: <project>/train_specialized_embeddings/optuna_trials)
+#   --trial-output-root <PATH>  Directory for per-trial artefacts (default: <project>/embedding_pipeline/train/optuna_trials)
 #   --num-workers <N>           Number of workers / job array size (default: 4)
 #   --max-concurrent <N>        Maximum concurrent workers (default: unlimited)
 #   --trials-per-worker <N>     Number of sequential trials per worker (default: 1)
@@ -25,7 +25,7 @@
 #   --venv-path <PATH>          Virtual environment path (default: ~/venv/spatial-building-embeddings)
 #   --no-venv                   Use system Python instead of managing a venv
 #   --project-root <PATH>       Override project root (defaults to repo root)
-#   --log-dir <PATH>            Override log directory (default: train_specialized_embeddings/logs/optuna)
+#   --log-dir <PATH>            Override log directory (default: embedding_pipeline/train/logs/optuna)
 #   --verbosity <LEVEL>         Optuna worker logging level (default: 20 / INFO)
 #   --help                      Show this message
 #

@@ -15,7 +15,7 @@ You need:
 Run the conversion script to generate the Hugging Face model files in `published_model/`:
 
 ```bash
-python publish_model/convert_to_hf.py
+uv run python -m embedding_pipeline.publish.convert_to_hf
 ```
 
 This script:
@@ -29,7 +29,7 @@ This script:
 Run the demo script to verify that the saved model can be loaded and run:
 
 ```bash
-python publish_model/demo_usage.py
+uv run python -m embedding_pipeline.publish.demo_usage
 ```
 
 You should see output indicating successful loading and inference, with an embedding norm close to 1.0.
@@ -57,16 +57,16 @@ The easiest way to generate embeddings is using the provided script:
 
 ```bash
 # Single image
-python publish_model/generate_embeddings_from_hf.py path/to/image.jpg
+uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf path/to/image.jpg
 
 # Multiple images
-python publish_model/generate_embeddings_from_hf.py image1.jpg image2.jpg image3.jpg
+uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image1.jpg image2.jpg image3.jpg
 
 # Save embeddings to file
-python publish_model/generate_embeddings_from_hf.py image.jpg --output embeddings.npy
+uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image.jpg --output embeddings.npy
 
 # Use a different model ID
-MODEL_ID="custom/org/model-name" python publish_model/generate_embeddings_from_hf.py image.jpg
+MODEL_ID="custom/org/model-name" uv run python -m embedding_pipeline.publish.generate_embeddings_from_hf image.jpg
 ```
 
 ### Python API: Loading from HuggingFace Hub

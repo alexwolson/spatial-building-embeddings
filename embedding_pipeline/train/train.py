@@ -17,11 +17,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa
-import pyarrow.parquet as pq
-import pyarrow.dataset as ds
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
+import pyarrow.parquet as pq
 import torch
 import torch.nn as nn
 from rich.logging import RichHandler
@@ -30,6 +30,7 @@ from torch.utils.data import DataLoader, RandomSampler
 # Try to import psutil for memory tracking
 try:
     import psutil
+
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
@@ -38,10 +39,9 @@ from config import (
     TripletTrainingConfig,
     load_config_from_file,
 )
-from embedding_pipeline.train.datasets import TripletDataset
 from embedding_pipeline.publish.modeling_spatial_embeddings import EmbeddingProjector
+from embedding_pipeline.train.datasets import TripletDataset
 from embedding_pipeline.train.loss import TripletLossWrapper
-
 
 LOGGER_NAME = "embedding_pipeline.train"
 
@@ -58,7 +58,7 @@ def format_bytes(bytes_val: int) -> str:
 def get_memory_usage() -> dict[str, Any]:
     """
     Get current memory usage information.
-    
+
     Returns:
         Dictionary with memory usage information including:
         - rss_mb: Resident Set Size in MB
@@ -69,7 +69,7 @@ def get_memory_usage() -> dict[str, Any]:
         - gpu_allocated_formatted: Formatted GPU allocated memory string
     """
     info: dict[str, Any] = {}
-    
+
     # Get process memory
     if PSUTIL_AVAILABLE:
         process = psutil.Process(os.getpid())
@@ -81,6 +81,7 @@ def get_memory_usage() -> dict[str, Any]:
         # Fallback: try to use resource module (Unix only)
         try:
             import resource
+
             mem_info = resource.getrusage(resource.RUSAGE_SELF)
             rss_bytes = mem_info.ru_maxrss * 1024  # ru_maxrss is in KB on Linux
             info["rss_mb"] = rss_bytes / (1024 * 1024)
@@ -90,26 +91,30 @@ def get_memory_usage() -> dict[str, Any]:
             info["rss_mb"] = None
             info["rss_gb"] = None
             info["rss_formatted"] = "unknown"
-    
+
     # Get GPU memory if available
     if torch.cuda.is_available():
         info["gpu_allocated_mb"] = torch.cuda.memory_allocated(0) / (1024 * 1024)
         info["gpu_reserved_mb"] = torch.cuda.memory_reserved(0) / (1024 * 1024)
-        info["gpu_allocated_formatted"] = format_bytes(int(torch.cuda.memory_allocated(0)))
-        info["gpu_reserved_formatted"] = format_bytes(int(torch.cuda.memory_reserved(0)))
+        info["gpu_allocated_formatted"] = format_bytes(
+            int(torch.cuda.memory_allocated(0))
+        )
+        info["gpu_reserved_formatted"] = format_bytes(
+            int(torch.cuda.memory_reserved(0))
+        )
     else:
         info["gpu_allocated_mb"] = None
         info["gpu_reserved_mb"] = None
         info["gpu_allocated_formatted"] = None
         info["gpu_reserved_formatted"] = None
-    
+
     return info
 
 
 def log_memory_usage(logger: logging.Logger, stage: str) -> None:
     """Log memory usage at a specific stage."""
     mem_info = get_memory_usage()
-    
+
     logger.info(f"Memory usage [{stage}]: RSS={mem_info['rss_formatted']}")
     if mem_info.get("gpu_allocated_formatted"):
         logger.info(
@@ -118,33 +123,35 @@ def log_memory_usage(logger: logging.Logger, stage: str) -> None:
         )
 
 
-def _chunked_take(scanner: ds.Scanner, indices: list[int], chunk_size: int = 20000) -> pa.Table:
+def _chunked_take(
+    scanner: ds.Scanner, indices: list[int], chunk_size: int = 20000
+) -> pa.Table:
     """
     Take rows from a scanner in chunks to avoid Arrow offset overflow.
-    
+
     PyArrow's take() can fail with "offset overflow" when given too many indices
     at once. This function chunks the indices and processes them incrementally.
-    
+
     Args:
         scanner: PyArrow dataset scanner
         indices: List of row indices to take
         chunk_size: Number of indices to process per chunk (default: 20,000)
-    
+
     Returns:
         Concatenated Arrow table with all selected rows
     """
-    
+
     if len(indices) == 0:
         # Return empty table with same schema
         return scanner.to_table().slice(0, 0)
-    
+
     # Split indices into chunks
     chunks = []
     for i in range(0, len(indices), chunk_size):
         chunk_indices = indices[i : i + chunk_size]
         chunk_table = scanner.take(chunk_indices)
         chunks.append(chunk_table)
-    
+
     # Concatenate all chunks
     if len(chunks) == 1:
         return chunks[0]
@@ -162,10 +169,10 @@ def _sample_by_building(
 ) -> pd.DataFrame:
     """
     Sample data by building_id to preserve building integrity.
-    
+
     This function samples unique building_ids first, then loads all rows for
     selected buildings. This prevents singleton buildings in the sample.
-    
+
     Args:
         dataset: PyArrow dataset
         columns: List of columns to read
@@ -173,30 +180,30 @@ def _sample_by_building(
         sample_buildings: Number of buildings to sample (takes precedence over sample_fraction)
         seed: Random seed for reproducibility
         logger: Optional logger for progress messages
-    
+
     Returns:
         pandas DataFrame with sampled data
     """
     if logger is None:
         logger = logging.getLogger(__name__)
-    
+
     # Pass 1: Read only building_id column to get unique buildings (memory-efficient)
     logger.info("Pass 1: Reading building_id column to identify unique buildings...")
     building_id_scanner = dataset.scanner(columns=["building_id"])
     building_id_table = building_id_scanner.to_table()
     building_id_df = building_id_table.to_pandas()
-    
+
     # Get unique building_ids and their counts
     building_counts = building_id_df["building_id"].value_counts()
     unique_buildings = building_counts.index.tolist()
     total_buildings = len(unique_buildings)
     total_rows = len(building_id_df)
-    
+
     logger.info(
         f"Found {total_buildings:,} unique buildings with {total_rows:,} total rows "
         f"(avg {total_rows/total_buildings:.1f} images per building)"
     )
-    
+
     # Determine how many buildings to sample
     if sample_buildings is not None and sample_buildings > 0:
         num_buildings_to_sample = min(sample_buildings, total_buildings)
@@ -214,7 +221,7 @@ def _sample_by_building(
         scanner = dataset.scanner(columns=columns)
         table = scanner.to_table()
         return table.to_pandas()
-    
+
     # Sample building_ids randomly
     rng = np.random.RandomState(seed)
     selected_building_ids = rng.choice(
@@ -223,29 +230,31 @@ def _sample_by_building(
     # Convert to list (rng.choice returns numpy array)
     selected_building_ids_list = selected_building_ids.tolist()
     selected_building_ids_set = set(selected_building_ids_list)
-    
+
     logger.info(f"Selected {len(selected_building_ids_set):,} buildings for sampling")
-    
+
     # Pass 2: Filter dataset to selected building_ids and read full data
     logger.info("Pass 2: Loading all rows for selected buildings...")
-    
+
     # Use PyArrow filter to get only rows with selected building_ids
     import pyarrow.compute as pc
-    
+
     # Create filter expression: building_id in selected_building_ids
     # Convert selected building_ids to Arrow array
     selected_building_ids_array = pa.array(selected_building_ids_list, type=pa.string())
-    
+
     # Create filter using is_in function
     # Note: is_in expects the field and a value_set (Arrow array)
-    filter_expr = pc.is_in(ds.field("building_id"), value_set=selected_building_ids_array)
-    
+    filter_expr = pc.is_in(
+        ds.field("building_id"), value_set=selected_building_ids_array
+    )
+
     # Apply filter and read selected columns
     filtered_dataset = dataset.filter(filter_expr)
     scanner = filtered_dataset.scanner(columns=columns)
     table = scanner.to_table()
     result_df = table.to_pandas()
-    
+
     # Verify we got data for all selected buildings
     actual_buildings = result_df["building_id"].nunique()
     actual_rows = len(result_df)
@@ -253,7 +262,7 @@ def _sample_by_building(
         f"Loaded {actual_rows:,} rows from {actual_buildings:,} buildings "
         f"(avg {actual_rows/actual_buildings:.1f} images per building)"
     )
-    
+
     return result_df
 
 
@@ -298,13 +307,13 @@ def set_seed(seed: int):
 def get_data_loader_config(device: torch.device) -> tuple[int, bool]:
     """
     Determine num_workers and pin_memory based on available CPU cores.
-    
+
     Checks SLURM_CPUS_PER_TASK first (for SLURM jobs), then falls back to
     os.cpu_count(). pin_memory is True for CUDA devices, False otherwise.
-    
+
     Args:
         device: The torch device being used
-        
+
     Returns:
         Tuple of (num_workers, pin_memory)
     """
@@ -317,13 +326,13 @@ def get_data_loader_config(device: torch.device) -> tuple[int, bool]:
             num_workers = os.cpu_count() or 1
     else:
         num_workers = os.cpu_count() or 1
-    
+
     # Ensure at least 1 worker, but cap at available CPUs
     num_workers = max(1, min(num_workers, os.cpu_count() or 1))
-    
+
     # pin_memory is beneficial for CUDA devices
     pin_memory = device.type == "cuda"
-    
+
     return num_workers, pin_memory
 
 
@@ -358,25 +367,23 @@ def load_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load training, validation, and difficulty metadata dataframes."""
     logger.info("Loading data files...")
-    
+
     # Log memory at the very start
     log_memory_usage(logger, "start_of_load_data")
 
     # Define required columns for train/val (with fallbacks for streetview_image_id)
     # Try to read streetview_image_id first, but allow fallback to dataset_id/patch_id or target_coord_hash
-    train_path = _validate_parquet_path(
-        config.train_parquet_path, "train", logger
-    )
+    train_path = _validate_parquet_path(config.train_parquet_path, "train", logger)
     logger.info(f"Loading training data from: {train_path}")
-    
+
     # Read only essential columns to reduce memory usage
     # Try to determine which columns exist first
     train_schema = pq.ParquetFile(train_path).schema_arrow
     available_cols = set(train_schema.names)
-    
+
     # Log memory after reading schema but before loading data
     log_memory_usage(logger, "after_train_schema_read")
-    
+
     # Required columns
     train_cols = ["building_id", "embedding"]
     # Optional columns for streetview_image_id (prefer streetview_image_id, fallback to components)
@@ -386,29 +393,32 @@ def load_data(
         train_cols.extend(["dataset_id", "patch_id"])
     elif "target_coord_hash" in available_cols:
         train_cols.append("target_coord_hash")
-    
+
     # Check if sampling is configured - if so, use PyArrow dataset API to sample during read
     needs_sampling = (
-        (config.sample_buildings is not None and config.sample_buildings > 0)
-        or (config.sample_fraction is not None and config.sample_fraction < 1.0)
-    )
-    
+        config.sample_buildings is not None and config.sample_buildings > 0
+    ) or (config.sample_fraction is not None and config.sample_fraction < 1.0)
+
     if needs_sampling:
         # Use building-based sampling to preserve building integrity
         logger.info("Using building-based sampling to preserve building integrity...")
         dataset = ds.dataset(train_path, format="parquet")
-        
+
         # Use building-based sampling
         train_df = _sample_by_building(
             dataset=dataset,
             columns=train_cols,
-            sample_fraction=config.sample_fraction if config.sample_buildings is None else None,
+            sample_fraction=(
+                config.sample_fraction if config.sample_buildings is None else None
+            ),
             sample_buildings=config.sample_buildings,
             seed=config.seed or 42,
             logger=logger,
         )
-        
-        logger.info(f"Loaded {len(train_df):,} training samples (building-based sampling)")
+
+        logger.info(
+            f"Loaded {len(train_df):,} training samples (building-based sampling)"
+        )
     else:
         # No sampling configured - use standard approach
         train_df = pd.read_parquet(train_path, columns=train_cols, engine="pyarrow")
@@ -417,10 +427,10 @@ def load_data(
     # Load validation data
     val_path = _validate_parquet_path(config.val_parquet_path, "val", logger)
     logger.info(f"Loading validation data from: {val_path}")
-    
+
     val_schema = pq.ParquetFile(val_path).schema_arrow
     available_cols = set(val_schema.names)
-    
+
     val_cols = ["building_id", "embedding"]
     if "streetview_image_id" in available_cols:
         val_cols.append("streetview_image_id")
@@ -428,29 +438,34 @@ def load_data(
         val_cols.extend(["dataset_id", "patch_id"])
     elif "target_coord_hash" in available_cols:
         val_cols.append("target_coord_hash")
-    
+
     # Check if validation sampling is configured
     needs_val_sampling = (
-        (config.val_sample_buildings is not None and config.val_sample_buildings > 0)
-        or (config.val_sample_fraction is not None and config.val_sample_fraction < 1.0)
-    )
-    
+        config.val_sample_buildings is not None and config.val_sample_buildings > 0
+    ) or (config.val_sample_fraction is not None and config.val_sample_fraction < 1.0)
+
     if needs_val_sampling:
         # Use building-based sampling for validation to preserve building integrity
         logger.info("Using building-based sampling for validation...")
         val_dataset = ds.dataset(val_path, format="parquet")
-        
+
         # Use building-based sampling
         val_df = _sample_by_building(
             dataset=val_dataset,
             columns=val_cols,
-            sample_fraction=config.val_sample_fraction if config.val_sample_buildings is None else None,
+            sample_fraction=(
+                config.val_sample_fraction
+                if config.val_sample_buildings is None
+                else None
+            ),
             sample_buildings=config.val_sample_buildings,
             seed=config.seed or 42,
             logger=logger,
         )
-        
-        logger.info(f"Loaded {len(val_df):,} validation samples (building-based sampling)")
+
+        logger.info(
+            f"Loaded {len(val_df):,} validation samples (building-based sampling)"
+        )
     else:
         # No sampling configured - use standard approach
         val_df = pd.read_parquet(val_path, columns=val_cols, engine="pyarrow")
@@ -461,7 +476,7 @@ def load_data(
         config.difficulty_metadata_path, "difficulty", logger
     )
     logger.info(f"Loading difficulty metadata from: {difficulty_path}")
-    
+
     # Only read required columns for difficulty metadata
     difficulty_cols = ["target_coord_hash", "neighbor_building_ids", "neighbor_bands"]
     difficulty_df = pd.read_parquet(
@@ -471,7 +486,7 @@ def load_data(
 
     # Log memory usage after loading dataframes
     log_memory_usage(logger, "after_data_loading")
-    
+
     # Log dataframe memory usage
     if PSUTIL_AVAILABLE:
         train_mem = train_df.memory_usage(deep=True).sum()
@@ -625,8 +640,10 @@ def compute_retrieval_metrics(
     with torch.no_grad():
         for start in range(0, num_embeddings, projection_batch_size):
             # Convert to float32 for numerical stability (stored as float16 for memory savings)
-            batch = val_dataset.embeddings[start : start + projection_batch_size].float().to(
-                device
+            batch = (
+                val_dataset.embeddings[start : start + projection_batch_size]
+                .float()
+                .to(device)
             )
             projected_batch = model(batch).cpu()
             projected_chunks.append(projected_batch)
@@ -780,13 +797,18 @@ def train(config: TripletTrainingConfig) -> int:
         logger.info("Creating datasets...")
         train_dataset = TripletDataset(train_df, difficulty_df, config)
         val_dataset = TripletDataset(val_df, difficulty_df, config)
-        
+
         # Log memory usage after creating datasets
         log_memory_usage(logger, "after_dataset_creation")
-        
+
         # Log embedding tensor memory usage
-        train_emb_mem = train_dataset.embeddings.element_size() * train_dataset.embeddings.nelement()
-        val_emb_mem = val_dataset.embeddings.element_size() * val_dataset.embeddings.nelement()
+        train_emb_mem = (
+            train_dataset.embeddings.element_size()
+            * train_dataset.embeddings.nelement()
+        )
+        val_emb_mem = (
+            val_dataset.embeddings.element_size() * val_dataset.embeddings.nelement()
+        )
         logger.info(
             f"Embedding tensor memory: train={format_bytes(train_emb_mem)} "
             f"({len(train_dataset.embeddings):,} embeddings, dtype={train_dataset.embeddings.dtype}), "
@@ -816,10 +838,10 @@ def train(config: TripletTrainingConfig) -> int:
             use_residual=config.use_residual,
             use_layer_norm=config.use_layer_norm,
         ).to(device)
-        
+
         # Log memory usage after model initialization
         log_memory_usage(logger, "after_model_init")
-        
+
         # Log model parameter count and memory
         total_params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -828,7 +850,7 @@ def train(config: TripletTrainingConfig) -> int:
             f"Model: {total_params:,} total parameters ({trainable_params:,} trainable), "
             f"memory={format_bytes(model_mem)}"
         )
-        
+
         if device.type == "cuda":
             gpu_mem_after_model = torch.cuda.memory_allocated(0) / (1024 * 1024 * 1024)
             logger.info(f"GPU memory after model init: {gpu_mem_after_model:.2f} GB")
@@ -844,7 +866,7 @@ def train(config: TripletTrainingConfig) -> int:
             lr=config.learning_rate,
             weight_decay=config.weight_decay,
         )
-        
+
         # Log memory after optimizer initialization (Adam stores momentum buffers)
         log_memory_usage(logger, "after_optimizer_init")
 
@@ -861,7 +883,7 @@ def train(config: TripletTrainingConfig) -> int:
         logger.info(f"Total epochs: {config.num_epochs}")
         logger.info(f"Batch size: {config.batch_size}")
         logger.info(f"Learning rate: {config.learning_rate}")
-        
+
         # Log memory before training starts
         log_memory_usage(logger, "before_training")
 
@@ -943,7 +965,7 @@ def train(config: TripletTrainingConfig) -> int:
             avg_epoch_loss = (
                 epoch_loss / num_batches if num_batches > 0 else float("inf")
             )
-            
+
             # Log memory after each epoch
             log_memory_usage(logger, f"after_epoch_{epoch+1}")
 

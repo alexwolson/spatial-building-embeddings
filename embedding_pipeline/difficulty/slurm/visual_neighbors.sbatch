@@ -59,7 +59,7 @@ echo "Using base config file: ${BASE_CONFIG}"
 LOG_FILE="${LOG_DIR:-.}/visual_neighbors_${SLURM_JOB_ID}.log"
 
 echo "Running visual neighbors computation at $(date '+%Y-%m-%d %H:%M:%S')"
-python "${PROJECT_ROOT}/embedding_pipeline/difficulty/compute_visual_neighbors.py" --config "${BASE_CONFIG}" | tee "${LOG_FILE}"
+python -m embedding_pipeline.difficulty.compute_visual_neighbors --config "${BASE_CONFIG}" | tee "${LOG_FILE}"
 EXIT_CODE=${PIPESTATUS[0]}
 
 if [ ${EXIT_CODE} -ne 0 ]; then

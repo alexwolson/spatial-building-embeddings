@@ -10,7 +10,6 @@ import argparse
 import logging
 import sys
 import tempfile
-from collections.abc import Iterator
 from pathlib import Path
 from typing import NamedTuple
 
@@ -19,11 +18,11 @@ from PIL import Image
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
 
 from config import ProcessTarConfig, load_config_from_file

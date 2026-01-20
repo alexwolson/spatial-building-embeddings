@@ -13,7 +13,7 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, Sampler
+from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -60,22 +60,35 @@ class TripletDataset(Dataset):
         missing = required_cols - set(embeddings_df.columns)
         if missing:
             raise ValueError(f"Missing required columns in embeddings_df: {missing}")
-            
+
         # Ensure streetview_image_id is present
         if "streetview_image_id" not in embeddings_df.columns:
             # Fallback for legacy data or if merge_and_split didn't add it
             # This is risky if IDs don't match metadata, but better than crashing if reproducible
-            if "dataset_id" in embeddings_df.columns and "patch_id" in embeddings_df.columns:
-                 dataset_str = embeddings_df["dataset_id"].astype(int).astype(str).str.zfill(4)
-                 patch_str = embeddings_df["patch_id"].astype(int).astype(str)
-                 self.streetview_image_ids = (dataset_str + "_" + patch_str).to_numpy(copy=False)
+            if (
+                "dataset_id" in embeddings_df.columns
+                and "patch_id" in embeddings_df.columns
+            ):
+                dataset_str = (
+                    embeddings_df["dataset_id"].astype(int).astype(str).str.zfill(4)
+                )
+                patch_str = embeddings_df["patch_id"].astype(int).astype(str)
+                self.streetview_image_ids = (dataset_str + "_" + patch_str).to_numpy(
+                    copy=False
+                )
             elif "target_coord_hash" in embeddings_df.columns:
-                 # Fallback to coordinate hash if that was used as key (legacy spatial mode)
-                 self.streetview_image_ids = embeddings_df["target_coord_hash"].astype(str).to_numpy(copy=False)
+                # Fallback to coordinate hash if that was used as key (legacy spatial mode)
+                self.streetview_image_ids = (
+                    embeddings_df["target_coord_hash"].astype(str).to_numpy(copy=False)
+                )
             else:
-                 raise ValueError("streetview_image_id column missing and cannot be inferred.")
+                raise ValueError(
+                    "streetview_image_id column missing and cannot be inferred."
+                )
         else:
-            self.streetview_image_ids = embeddings_df["streetview_image_id"].astype(str).to_numpy(copy=False)
+            self.streetview_image_ids = (
+                embeddings_df["streetview_image_id"].astype(str).to_numpy(copy=False)
+            )
 
         # Materialise embeddings once and place them in shared memory for DataLoader workers
         # Use float16 to reduce memory usage (halves memory footprint)
@@ -154,11 +167,11 @@ class TripletDataset(Dataset):
 
         # Index difficulty metadata by image ID (stored in target_coord_hash column)
         for _, row in difficulty_metadata_df.iterrows():
-            image_id = str(row["target_coord_hash"]) # Effectively streetview_image_id
-            
+            image_id = str(row["target_coord_hash"])  # Effectively streetview_image_id
+
             neighbors = self._ensure_sequence(row["neighbor_building_ids"])
             bands = self._ensure_sequence(row["neighbor_bands"])
-            
+
             self.image_to_neighbors[image_id] = neighbors
             self.image_to_bands[image_id] = bands
 
@@ -192,7 +205,9 @@ class TripletDataset(Dataset):
         # Sample negative using UCB-guided difficulty band selection
         # Pass the anchor's specific image ID to find its specific visual neighbors
         anchor_image_id = self.streetview_image_ids[anchor_idx]
-        negative_idx, difficulty_band = self._sample_negative(anchor_image_id, building_id)
+        negative_idx, difficulty_band = self._sample_negative(
+            anchor_image_id, building_id
+        )
 
         # Get embeddings and convert to float32 for numerical stability
         # (stored as float16 for memory savings, but model expects float32)
@@ -210,7 +225,9 @@ class TripletDataset(Dataset):
             difficulty_band=difficulty_band,
         )
 
-    def _sample_negative(self, anchor_image_id: str, anchor_building_id: str) -> tuple[int, int]:
+    def _sample_negative(
+        self, anchor_image_id: str, anchor_building_id: str
+    ) -> tuple[int, int]:
         """
         Sample a negative building using UCB-guided difficulty band selection.
 
@@ -218,9 +235,7 @@ class TripletDataset(Dataset):
             Tuple of (negative_idx, difficulty_band)
         """
         # Get neighbors and bands for this anchor image
-        neighbors = self._ensure_sequence(
-            self.image_to_neighbors.get(anchor_image_id)
-        )
+        neighbors = self._ensure_sequence(self.image_to_neighbors.get(anchor_image_id))
         bands = self._ensure_sequence(self.image_to_bands.get(anchor_image_id))
 
         if len(neighbors) == 0 or len(bands) == 0:

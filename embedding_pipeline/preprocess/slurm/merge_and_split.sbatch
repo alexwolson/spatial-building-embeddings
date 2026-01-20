@@ -97,7 +97,7 @@ echo "Using base config file: ${BASE_CONFIG}"
 # Step 6: Run merge and split script with base config
 echo "Starting merge and split at $(date '+%Y-%m-%d %H:%M:%S')"
 
-python "${PROJECT_ROOT}/embedding_pipeline/preprocess/merge_and_split.py" \
+python -m embedding_pipeline.preprocess.merge_and_split \
     --config "${BASE_CONFIG}"
 
 EXIT_CODE=$?

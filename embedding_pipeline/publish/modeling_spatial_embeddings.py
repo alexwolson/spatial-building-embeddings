@@ -1,8 +1,9 @@
+from typing import Literal, Optional, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import PreTrainedModel, AutoModel
-from typing import Optional, Tuple, Union, Literal
+from transformers import AutoModel, PreTrainedModel
 
 # Handle import for both local development and HuggingFace Hub loading
 try:
@@ -13,13 +14,7 @@ except ImportError:
     try:
         from configuration_spatial_embeddings import SpatialEmbeddingsConfig
     except ImportError:
-        # Last resort: import from the module directly
-        import sys
-        from pathlib import Path
-        # Get the directory where this file is located
-        current_dir = Path(__file__).parent
-        if str(current_dir) not in sys.path:
-            sys.path.insert(0, str(current_dir))
+        # Last resort: import from the module directly (Hugging Face dynamic module loading)
         from configuration_spatial_embeddings import SpatialEmbeddingsConfig
 
 

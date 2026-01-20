@@ -1,6 +1,6 @@
 ## Spatial Building Embeddings: What They Are, How They’re Built, and the Data Architecture
 
-This document is a collaborator-facing reference for the **Spatial Building Embeddings** produced by this repo and for the **final embeddings generated on new data** via `publish_model/slurm/generate_embeddings_from_parquet.sbatch`.
+This document is a collaborator-facing reference for the **Spatial Building Embeddings** produced by this repo and for the **final embeddings generated on new data** via `embedding_pipeline/publish/slurm/generate_embeddings_from_parquet.sbatch`.
 
 The modality throughout is **Google Street View imagery of buildings** (facades captured from street-level viewpoints).
 
@@ -55,7 +55,7 @@ There are two related vectors to keep straight:
 
 In the published model implementation, the specialization happens in:
 
-- `publish_model/modeling_spatial_embeddings.py`
+- `embedding_pipeline/publish/modeling_spatial_embeddings.py`
   - backbone pooling: prefers `outputs.pooler_output` if available, otherwise uses CLS token from `last_hidden_state[:, 0]`
   - projector output is **L2-normalized** with `F.normalize(..., p=2, dim=1)`
 
@@ -89,13 +89,13 @@ This is what makes the final embedding specialize for building identity vs a gen
 ### 1) Raw data: Google Street View building tar archives
 
 Each `.tar` contains a directory structure with paired `.jpg/.jpeg` and `.txt` metadata files.
-See `preprocess_raw_data/raw_data_structure.md` for details.
+See `embedding_pipeline/preprocess/raw_data_structure.md` for details.
 
 The metadata `.txt` includes a `d` line with identifiers and geometry/camera fields; the pipeline keeps only identifiers and target lat/lon.
 
 ### 2) `process_tar.py`: tar → intermediate parquet
 
-Script: `preprocess_raw_data/process_tar.py`
+Script: `embedding_pipeline/preprocess/process_tar.py`
 
 What it does:
 
@@ -118,7 +118,7 @@ Intermediate parquet columns (generated in `process_tar.py`):
 
 ### 3) `generate_embeddings.py`: intermediate parquet (+ tar) → per-image backbone embeddings
 
-Script: `generate_embeddings/generate_embeddings.py`
+Script: `embedding_pipeline/generate/generate_embeddings.py`
 
 What it does:
 
@@ -141,7 +141,7 @@ Embedding parquet columns:
 
 ### 4) `merge_and_split.py`: build train/val/test parquet splits for projector training
 
-Script: `preprocess_raw_data/merge_and_split.py`
+Script: `embedding_pipeline/preprocess/merge_and_split.py`
 
 What it does:
 
@@ -164,12 +164,12 @@ This repo’s triplet sampling can use “difficulty bands” to choose negative
 
 Pipeline:
 
-1. `preprocess_raw_data/compute_fingerprints.py` creates compact pixel fingerprints:
+1. `embedding_pipeline/preprocess/compute_fingerprints.py` creates compact pixel fingerprints:
    - Reads intermediate parquet + extracts tar
    - Resizes images to `image_size x image_size` (default 16×16)
    - Stores a `fingerprint` array per row
 
-2. `difficulty_metadata/compute_visual_neighbors.py` computes neighbors in fingerprint space:
+2. `embedding_pipeline/difficulty/compute_visual_neighbors.py` computes neighbors in fingerprint space:
    - Loads all fingerprint parquet files
    - PCA to `pca_components` dims
    - BallTree nearest neighbors (excluding same-building)
@@ -185,7 +185,7 @@ Difficulty metadata parquet schema:
 
 ### 6) Triplet training: projector head specialization
 
-Entry point: `train_specialized_embeddings/train.py`
+Entry point: `embedding_pipeline/train/train.py`
 
 High-level behavior:
 
@@ -193,11 +193,11 @@ High-level behavior:
 - Uses triplet loss to train a projector from backbone dim → 256
 - In-code behavior:
   - anchor/positive are two different images from the same `building_id`
-  - negatives are sampled using difficulty metadata bands (see `train_specialized_embeddings/datasets.py`)
+  - negatives are sampled using difficulty metadata bands (see `embedding_pipeline/train/datasets.py`)
 
 ### 7) Publishing: build a single HF model (backbone + trained projector)
 
-Script: `publish_model/convert_to_hf.py`
+Script: `embedding_pipeline/publish/convert_to_hf.py`
 
 What it does:
 
@@ -206,15 +206,15 @@ What it does:
 - Loads projector weights from `checkpoint_best.pt`.
 - Infers key projector architecture fields from the checkpoint weights (e.g., `input_dim`, `output_dim`, number of hidden layers), and uses the config for fields that are not inferable from weights (e.g., dropout, activation).
 - Saves a Transformers-compatible model directory that includes:
-  - `publish_model/modeling_spatial_embeddings.py`
-  - `publish_model/configuration_spatial_embeddings.py`
+- `embedding_pipeline/publish/modeling_spatial_embeddings.py`
+- `embedding_pipeline/publish/configuration_spatial_embeddings.py`
 
 This published model is what `AutoModel.from_pretrained(..., trust_remote_code=True)` loads.
 
 ### 8) Final embeddings on new data: packaged parquet → embeddings dataset directory
 
-Script: `publish_model/generate_embeddings_from_parquet.py`
-SLURM wrapper: `publish_model/slurm/generate_embeddings_from_parquet.sbatch` (submitted via `publish_model/slurm/submit_embeddings_from_parquet.sh`)
+Script: `embedding_pipeline/publish/generate_embeddings_from_parquet.py`
+SLURM wrapper: `embedding_pipeline/publish/slurm/generate_embeddings_from_parquet.sbatch` (submitted via `embedding_pipeline/publish/slurm/submit_embeddings_from_parquet.sh`)
 
 Input expectation (minimum):
 
@@ -258,7 +258,7 @@ The core directories/paths are configured in `config.toml`:
 - `[paths].difficulty_metadata_path`: single difficulty parquet output from `compute_visual_neighbors.py`
 - `[paths].checkpoint_dir`: training checkpoints (projector weights)
 
-Note: the “final embeddings on new data” pipeline writes wherever you point `--output` in `publish_model/generate_embeddings_from_parquet.py` and is not controlled by `config.toml`.
+Note: the “final embeddings on new data” pipeline writes wherever you point `--output` in `embedding_pipeline/publish/generate_embeddings_from_parquet.py` and is not controlled by `config.toml`.
 
 ### Artifact inventory (what you should expect to exist)
 
@@ -286,7 +286,7 @@ Note: the “final embeddings on new data” pipeline writes wherever you point 
 ### Generate embeddings on new data (cluster)
 
 ```bash
-./publish_model/slurm/submit_embeddings_from_parquet.sh \
+./embedding_pipeline/publish/slurm/submit_embeddings_from_parquet.sh \
   --account <ACCOUNT> \
   --input /path/to/packaged_images.parquet \
   --output /path/to/embeddings.parquet \
@@ -297,7 +297,7 @@ Note: the “final embeddings on new data” pipeline writes wherever you point 
 ### Generate embeddings on new data (local, direct python)
 
 ```bash
-uv run python publish_model/generate_embeddings_from_parquet.py \
+uv run python -m embedding_pipeline.publish.generate_embeddings_from_parquet \
   --input /path/to/packaged_images.parquet \
   --output /path/to/embeddings.parquet \
   --model-id alexwaolson/spatial-building-embeddings \
@@ -308,7 +308,7 @@ uv run python publish_model/generate_embeddings_from_parquet.py \
 
 - **GPU is effectively required** for reasonable throughput, especially for large backbones (e.g., DINOv3 ViT-7B). The SLURM script enforces GPU availability.
 - **VRAM / batch sizing**: large backbones may require large VRAM; treat `--batch-size` as a throughput knob constrained by GPU memory (the provided SLURM scripts are tuned for H100-class GPUs).
-- **Resume behavior**: `publish_model/generate_embeddings_from_parquet.py` writes deterministic part filenames and skips existing parts. It also maintains `state.json` and avoids clobbering an existing output file by writing to a sidecar directory `<output>.parts`.
+- **Resume behavior**: `embedding_pipeline/publish/generate_embeddings_from_parquet.py` writes deterministic part filenames and skips existing parts. It also maintains `state.json` and avoids clobbering an existing output file by writing to a sidecar directory `<output>.parts`.
 - **HF caching on cluster**: the SLURM script sets `HF_HOME`/`TRANSFORMERS_CACHE` under `$SCRATCH` to avoid filling home-directory quotas.
 - **Authentication**: if you point `--model-id` at a gated/private model, you’ll need `HF_TOKEN` available to the job environment.
 - **`neighbor_distances_meters` is not meters** in the visual difficulty pipeline; it is Euclidean distance in PCA-reduced fingerprint space. Treat it as a relative visual distance.

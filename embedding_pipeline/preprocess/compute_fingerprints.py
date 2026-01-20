@@ -11,15 +11,8 @@ import argparse
 import logging
 import sys
 import tempfile
-import time
 from pathlib import Path
 from typing import Callable, Sequence
-
-# Add project root to sys.path before imports
-script_dir = Path(__file__).parent
-project_root = script_dir.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
 
 import numpy as np
 import pandas as pd
@@ -27,11 +20,11 @@ from PIL import Image
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
 
 from config import ComputeFingerprintsConfig, load_config_from_file
@@ -143,7 +136,7 @@ def compute_fingerprints_batch(
     fingerprints = []
     num_processed = 0
     total_images = len(images)
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -152,13 +145,15 @@ def compute_fingerprints_batch(
         refresh_per_second=1,
     ) as progress:
         task = progress.add_task("Computing fingerprints...", total=total_images)
-        
+
         for rel_path in images:
             full_path = extract_dir / rel_path
             try:
                 with Image.open(full_path) as img:
                     img = img.convert("RGB")
-                    img = img.resize((image_size, image_size), Image.Resampling.BILINEAR)
+                    img = img.resize(
+                        (image_size, image_size), Image.Resampling.BILINEAR
+                    )
                     # Flatten to 1D array
                     fingerprint = np.array(img, dtype=np.uint8).flatten()
                     fingerprints.append(fingerprint)
@@ -166,11 +161,13 @@ def compute_fingerprints_batch(
                 # Should not happen as paths are pre-validated, but safe guard
                 logger.warning(f"Failed to process image {full_path}: {e}")
                 # Append zero vector as fallback
-                fingerprints.append(np.zeros(image_size * image_size * 3, dtype=np.uint8))
-            
+                fingerprints.append(
+                    np.zeros(image_size * image_size * 3, dtype=np.uint8)
+                )
+
             num_processed += 1
             progress.update(task, advance=1)
-            
+
     return np.stack(fingerprints)
 
 
@@ -192,7 +189,7 @@ def process_intermediate_file(
         image_size: Size of fingerprint images
         temp_dir: Temporary directory for extraction (optional)
         log_file: Optional log file path
-    
+
     Returns:
         Statistics dictionary
     """
@@ -297,7 +294,7 @@ def process_intermediate_file(
 
         # Create output dataframe with fingerprints
         df_output = df.iloc[valid_indices].copy()
-        
+
         # Add identifiers if missing (same logic as merge_and_split)
         dataset_str = df_output["dataset_id"].astype(int).astype(str).str.zfill(4)
         target_str = df_output["target_id"].astype(int).astype(str)
@@ -312,7 +309,9 @@ def process_intermediate_file(
         df_output["fingerprint"] = fingerprints_list
 
         stats["successful_fingerprints"] = len(fingerprints_list)
-        stats["failed_images"] = stats["total_entries"] - stats["successful_fingerprints"]
+        stats["failed_images"] = (
+            stats["total_entries"] - stats["successful_fingerprints"]
+        )
 
         # Write output parquet file
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -382,14 +381,18 @@ def main() -> int:
         try:
             config.tar_file = config._auto_detect_tar_file()
         except Exception as e:
-            logger.error(f"Failed to auto-detect tar file for {config.parquet_file}: {e}")
+            logger.error(
+                f"Failed to auto-detect tar file for {config.parquet_file}: {e}"
+            )
             return 1
 
     if args.temp_dir is not None:
         config.temp_dir = args.temp_dir
 
     if config.parquet_file is None:
-        logger.error("Parquet file must be provided via config or command line arguments.")
+        logger.error(
+            "Parquet file must be provided via config or command line arguments."
+        )
         return 1
 
     if config.log_file:
@@ -431,4 +434,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

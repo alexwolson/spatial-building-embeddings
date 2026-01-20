@@ -1,8 +1,9 @@
-import torch
-from transformers import AutoModel, AutoImageProcessor
-from PIL import Image
-import requests
 from pathlib import Path
+
+import requests
+import torch
+from PIL import Image
+from transformers import AutoImageProcessor, AutoModel
 
 
 def main():

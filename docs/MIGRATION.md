@@ -121,7 +121,7 @@ Update any automation that references the old paths:
 - python preprocess_raw_data/process_tar.py --config config.toml
 
 # New
-- python embedding_pipeline/preprocess/process_tar.py --config config.toml
+- python -m embedding_pipeline.preprocess.process_tar --config config.toml
 ```
 
 ## Benefits of This Organization

@@ -1,6 +1,13 @@
 .cursor/
 data/
 
+# Local scratch / backups
+*.bak
+*.backup
+*.tmp
+*.swp
+*~
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

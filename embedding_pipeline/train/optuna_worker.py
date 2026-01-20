@@ -25,15 +25,14 @@ from typing import Any
 
 import optuna  # type: ignore[import]
 import torch
-from sqlalchemy.exc import OperationalError
 from rich.logging import RichHandler
+from sqlalchemy.exc import OperationalError
 
 from config import (
     TripletTrainingConfig,
     load_config_from_file,
 )
 from embedding_pipeline.train.train import train as run_training
-
 
 LOGGER_NAME = "embedding_pipeline.train.optuna_worker"
 
@@ -186,7 +185,7 @@ def build_config_with_updates(
     base_config: TripletTrainingConfig,
     updates: dict[str, Any],
 ) -> TripletTrainingConfig:
-    payload = base_config.model_dump(mode='json')
+    payload = base_config.model_dump(mode="json")
     payload.update(updates)
     return TripletTrainingConfig(**payload)
 

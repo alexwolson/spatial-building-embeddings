@@ -19,12 +19,6 @@ import time
 from pathlib import Path
 from typing import Callable, Sequence
 
-# Add project root to sys.path before imports
-script_dir = Path(__file__).parent
-project_root = script_dir.parent
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import numpy as np
 import pandas as pd
 import torch
@@ -33,13 +27,13 @@ from PIL import Image
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
-from transformers import AutoModel, AutoImageProcessor
+from transformers import AutoImageProcessor, AutoModel
 
 from config import GenerateEmbeddingsConfig, load_config_from_file
 
@@ -111,9 +105,7 @@ def load_model_and_processor(model_name: str) -> tuple[nn.Module, Callable]:
 
     # Load Model
     try:
-        model = AutoModel.from_pretrained(
-            model_name, trust_remote_code=True
-        )
+        model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
     except Exception as e:
         raise RuntimeError(f"Failed to load model {model_name}: {e}")
 
@@ -300,7 +292,10 @@ def generate_embeddings_batch(
 
                 # Extract embeddings based on pooling_type
                 if pooling_type == "pooler_output":
-                    if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
+                    if (
+                        hasattr(outputs, "pooler_output")
+                        and outputs.pooler_output is not None
+                    ):
                         embeddings = outputs.pooler_output
                     else:
                         # Fallback if pooler_output is requested but not available
@@ -385,7 +380,7 @@ def process_intermediate_file(
         temp_dir: Temporary directory for extraction (optional)
         log_file: Optional log file path
         pooling_type: Pooling method to use
-    
+
     Returns:
         Statistics dictionary
     """
@@ -605,14 +600,18 @@ def main() -> int:
         try:
             config.tar_file = config._auto_detect_tar_file()
         except Exception as e:
-            logger.error(f"Failed to auto-detect tar file for {config.parquet_file}: {e}")
+            logger.error(
+                f"Failed to auto-detect tar file for {config.parquet_file}: {e}"
+            )
             return 1
 
     if args.temp_dir is not None:
         config.temp_dir = args.temp_dir
 
     if config.parquet_file is None:
-        logger.error("Parquet file must be provided via config or command line arguments.")
+        logger.error(
+            "Parquet file must be provided via config or command line arguments."
+        )
         return 1
 
     if config.log_file:

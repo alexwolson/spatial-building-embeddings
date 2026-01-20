@@ -13,8 +13,8 @@ The training pipeline:
 ## Architecture
 
 ### Model
-- **Input**: 768-dimensional DINOv2 embeddings
-- **Architecture**: Two-layer MLP (768 → 512 → 256)
+- **Input**: config-driven backbone embedding vectors (e.g. 768–4096 dims depending on the backbone and pooling)
+- **Architecture**: MLP projection head (input_dim → hidden_dim → output_dim, configurable)
 - **Features**: GELU activation, LayerNorm, dropout, residual shortcut, L2-normalized output
 - **All hyperparameters configurable via TOML config**
 
@@ -33,43 +33,22 @@ The training pipeline:
 
 ```bash
 # Using unified config file (at project root)
-python train_specialized_embeddings/train.py --config config.toml
+uv run python -m embedding_pipeline.train.train --config config.toml
 
 # Using environment variables
 export TRIPLET_TRAINING_TRAIN_PARQUET_PATH=data/merged/train.parquet
 export TRIPLET_TRAINING_VAL_PARQUET_PATH=data/merged/val.parquet
 export TRIPLET_TRAINING_DIFFICULTY_METADATA_PATH=data/difficulty/difficulty_metadata.parquet
 export TRIPLET_TRAINING_CHECKPOINT_DIR=checkpoints/triplet
-python train_specialized_embeddings/train.py
+uv run python -m embedding_pipeline.train.train
 ```
 
 ### SLURM Cluster Training
 
 ```bash
-# Basic usage
-./train_specialized_embeddings/slurm/submit_training.sh \
-    --train-parquet data/merged/train.parquet \
-    --val-parquet data/merged/val.parquet \
-    --difficulty-metadata data/difficulty/difficulty_metadata.parquet \
-    --checkpoint-dir checkpoints/triplet \
-    --account <YOUR_ACCOUNT>
-
-# With custom config file
-./train_specialized_embeddings/slurm/submit_training.sh \
-    --train-parquet data/merged/train.parquet \
-    --val-parquet data/merged/val.parquet \
-    --difficulty-metadata data/difficulty/difficulty_metadata.parquet \
-    --checkpoint-dir checkpoints/triplet \
+# Train using the best hyperparameters fetched from WandB (see `[training]` in config.toml)
+./embedding_pipeline/train/slurm/submit_best_training.sh \
     --config config.toml \
-    --account <YOUR_ACCOUNT>
-
-# With output embeddings directory
-./train_specialized_embeddings/slurm/submit_training.sh \
-    --train-parquet data/merged/train.parquet \
-    --val-parquet data/merged/val.parquet \
-    --difficulty-metadata data/difficulty/difficulty_metadata.parquet \
-    --checkpoint-dir checkpoints/triplet \
-    --output-embeddings-dir data/specialized_embeddings \
     --account <YOUR_ACCOUNT>
 ```
 
@@ -81,7 +60,7 @@ Leverage Optuna to explore hyperparameters by launching many short training runs
 2. Launch the workers:
 
    ```bash
-   ./train_specialized_embeddings/slurm/submit_optuna_tuning.sh \
+   ./embedding_pipeline/train/slurm/submit_optuna_tuning.sh \
        --account <ACCOUNT> \
        --study-name triplet_tuning \
        --storage-path /home/<user>/scratch/optuna/triplet.db \
@@ -91,21 +70,21 @@ Leverage Optuna to explore hyperparameters by launching many short training runs
        --disable-wandb
    ```
 
-3. Monitor with `squeue -j <JOB_ID>` and tail logs from `train_specialized_embeddings/logs/optuna`.
+3. Monitor with `squeue -j <JOB_ID>` and tail logs from your configured `[global].log_dir` (see `config.toml`).
 
-Each worker invokes `optuna_worker.py`, samples a configuration, trains, and records results under `train_specialized_embeddings/optuna_trials/trial_#####/`. Use the submit script flags to control concurrency (`--max-concurrent`), WandB behaviour, epoch budgets, or to point at a non-SQLite DSN via `--storage-url`.
+Each worker invokes `optuna_worker.py`, samples a configuration, trains, and records results under `embedding_pipeline/train/optuna_trials/trial_#####/`. Use the submit script flags to control concurrency (`--max-concurrent`), WandB behaviour, epoch budgets, or to point at a non-SQLite DSN via `--storage-url`.
 
 ## Configuration
 
-See the root `config.example.toml` for a complete example configuration file. The unified config includes a `[global]` section for shared settings (seed, data paths) and a `[triplet_training]` section for training-specific settings. All hyperparameters can be specified via:
-- TOML config file (recommended) - use the unified `config.toml` at project root
+The unified `config.toml` is organized by type-based sections. Training reads from (at least) `[paths]`, `[training_model]`, `[training]`, and `[logging]` (plus `[global]` for shared defaults). All hyperparameters can be specified via:
+- TOML config file (recommended) - use the unified `config.toml` at the project root
 - Environment variables with `TRIPLET_TRAINING_` prefix
 - Command-line arguments (for SLURM submission script)
 
 ### Key Configuration Options
 
 **Model Architecture:**
-- `input_dim`: Input embedding dimension (default: 768 for DINOv2 base)
+- `input_dim`: Input embedding dimension (must match the embedding vectors in your merged parquet)
 - `hidden_dim`: Hidden layer dimension (default: 512)
 - `output_dim`: Output embedding dimension (default: 256)
 - `dropout`: Dropout probability (default: 0.1)
@@ -155,7 +134,7 @@ See the root `config.example.toml` for a complete example configuration file. Th
 - Validation parquet: Must contain `building_id` and `embedding` columns
 - Difficulty metadata: Must contain `target_coord_hash`, `neighbor_building_ids`, `neighbor_bands` columns
 
-**Note**: The training parquet files should have `target_coord_hash` column for matching with difficulty metadata. This is added by `preprocess_raw_data/merge_and_split.py`.
+**Note**: difficulty metadata is keyed by `target_coord_hash` (a legacy name). In the current visual-neighbour pipeline, `target_coord_hash` stores the per-image `streetview_image_id`.
 
 ## Monitoring
 
@@ -166,8 +145,8 @@ See the root `config.example.toml` for a complete example configuration file. Th
 
 ### SLURM Training
 - Monitor job: `squeue -j <JOB_ID>`
-- View logs: `tail -f train_specialized_embeddings/logs/train_triplet_<JOB_ID>.out`
-- Check errors: `tail -f train_specialized_embeddings/logs/train_triplet_<JOB_ID>.err`
+- View logs: `tail -f <LOG_DIR>/best_training_<JOB_ID>.out`
+- Check errors: `tail -f <LOG_DIR>/best_training_<JOB_ID>.err`
 
 ## Troubleshooting
 
@@ -180,8 +159,8 @@ See the root `config.example.toml` for a complete example configuration file. Th
 - Reduce `num_workers` in config
 
 **Difficulty metadata not matching:**
-- Ensure training parquet files have `target_coord_hash` column
-- Check that `difficulty_metadata.parquet` was generated from the same dataset
+- Ensure training parquet files have `streetview_image_id` (or can infer it from `dataset_id` + `patch_id`)
+- Check that `difficulty_metadata.parquet` was generated from the same dataset and uses matching per-image IDs (stored under `target_coord_hash`)
 
 **Checkpoint loading fails:**
 - Ensure checkpoint path is correct

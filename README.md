@@ -18,6 +18,14 @@ Complete pipeline for generating, training, and publishing specialized building 
 
 See [`embedding_pipeline/README.md`](embedding_pipeline/README.md) for detailed documentation.
 
+## Installation
+
+This repo uses `uv` (Python 3.11). For local development, install with extras:
+
+- `uv sync --all-extras`
+
+On clusters that provide Arrow/PyArrow via modules, you can typically omit the `arrow` extra and rely on the site module instead.
+
 ### 2. **`clustering/`** - Clustering Phase (Future Work)
 Reserved for the next phase: clustering the specialized embeddings with additional datasets. See [`clustering/README.md`](clustering/README.md) for planned functionality.
 
@@ -30,17 +38,17 @@ The following graph shows the dependency relationships between all `submit_*.sh`
 
 ```mermaid
 flowchart TD
-    A[embedding_pipeline/preprocess/slurm/submit_tar_jobs.sh<br/>Process raw tar files]
+    A["embedding_pipeline/preprocess/slurm/submit_tar_jobs.sh (process raw tar files)"]
     
-    B[embedding_pipeline/preprocess/slurm/submit_fingerprint_jobs.sh<br/>Compute fingerprints]
-    C[embedding_pipeline/generate/slurm/submit_embedding_jobs.sh<br/>Generate embeddings]
+    B["embedding_pipeline/preprocess/slurm/submit_fingerprint_jobs.sh (compute fingerprints)"]
+    C["embedding_pipeline/generate/slurm/submit_embedding_jobs.sh (generate embeddings)"]
     
-    D[embedding_pipeline/preprocess/slurm/submit_merge.sh<br/>Merge & create splits]
+    D["embedding_pipeline/preprocess/slurm/submit_merge.sh (merge & create splits)"]
     
-    E[embedding_pipeline/difficulty/slurm/submit_visual_neighbors.sh<br/>Compute visual neighbors]
+    E["embedding_pipeline/difficulty/slurm/submit_visual_neighbors.sh (compute visual neighbors)"]
     
-    F[embedding_pipeline/train/slurm/submit_optuna_tuning.sh<br/>Hyperparameter tuning]
-    G[embedding_pipeline/train/slurm/submit_best_training.sh<br/>Train with best params]
+    F["embedding_pipeline/train/slurm/submit_optuna_tuning.sh (hyperparameter tuning)"]
+    G["embedding_pipeline/train/slurm/submit_best_training.sh (train with best params)"]
     
     A --> B
     A --> C
@@ -54,14 +62,6 @@ flowchart TD
     
     E --> F
     E --> G
-    
-    style A fill:#e1f5e1
-    style B fill:#e1f0f5
-    style C fill:#e1f0f5
-    style D fill:#fff4e1
-    style E fill:#f5e1f0
-    style F fill:#f0e1f5
-    style G fill:#f0e1f5
 ```
 
 ## Configuration

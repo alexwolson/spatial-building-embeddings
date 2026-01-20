@@ -28,7 +28,6 @@ from config import (
 )
 from embedding_pipeline.train.train import train as run_training
 
-
 LOGGER_NAME = "embedding_pipeline.train.fetch_best_and_train"
 
 

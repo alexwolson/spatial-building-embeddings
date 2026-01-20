@@ -65,7 +65,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
 fi
 
 CMD=(
-    python "${PROJECT_ROOT}/embedding_pipeline/train/optuna_worker.py"
+    python -m embedding_pipeline.train.optuna_worker
     --study-name "${STUDY_NAME}"
     --storage-url "${STORAGE_URL}"
     --base-config "${BASE_CONFIG_PATH}"
