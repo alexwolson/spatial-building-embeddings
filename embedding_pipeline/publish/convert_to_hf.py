@@ -6,7 +6,7 @@ import torch
 import logging
 
 # Add project root to sys.path
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
 from config import (
@@ -14,8 +14,8 @@ from config import (
     TripletTrainingConfig,
     GenerateEmbeddingsConfig,
 )
-from publish_model.configuration_spatial_embeddings import SpatialEmbeddingsConfig
-from publish_model.modeling_spatial_embeddings import SpatialEmbeddingsModel
+from embedding_pipeline.publish.configuration_spatial_embeddings import SpatialEmbeddingsConfig
+from embedding_pipeline.publish.modeling_spatial_embeddings import SpatialEmbeddingsModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

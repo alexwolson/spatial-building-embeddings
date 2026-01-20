@@ -38,12 +38,12 @@ from config import (
     TripletTrainingConfig,
     load_config_from_file,
 )
-from train_specialized_embeddings.datasets import TripletDataset
-from publish_model.modeling_spatial_embeddings import EmbeddingProjector
-from train_specialized_embeddings.loss import TripletLossWrapper
+from embedding_pipeline.train.datasets import TripletDataset
+from embedding_pipeline.publish.modeling_spatial_embeddings import EmbeddingProjector
+from embedding_pipeline.train.loss import TripletLossWrapper
 
 
-LOGGER_NAME = "train_specialized_embeddings"
+LOGGER_NAME = "embedding_pipeline.train"
 
 
 def format_bytes(bytes_val: int) -> str:

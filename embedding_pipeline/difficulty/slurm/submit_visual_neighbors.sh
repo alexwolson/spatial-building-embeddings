@@ -2,7 +2,7 @@
 # Job submission script for computing visual difficulty metadata on Nibi cluster.
 #
 # This script validates fingerprint inputs, prepares the Python environment,
-# and submits a SLURM job that runs difficulty_metadata/compute_visual_neighbors.py.
+# and submits a SLURM job that runs embedding_pipeline/difficulty/compute_visual_neighbors.py.
 #
 # Usage:
 #   ./submit_visual_neighbors.sh --account <ACCOUNT>
