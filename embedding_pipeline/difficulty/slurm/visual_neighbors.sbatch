@@ -39,8 +39,8 @@ fi
 
 mkdir -p "$(dirname "${OUTPUT_FILE}")"
 
-if [ ! -f "${PROJECT_ROOT}/difficulty_metadata/compute_visual_neighbors.py" ]; then
-    error_exit "compute_visual_neighbors.py not found at ${PROJECT_ROOT}/difficulty_metadata/compute_visual_neighbors.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/difficulty/compute_visual_neighbors.py" ]; then
+    error_exit "compute_visual_neighbors.py not found at ${PROJECT_ROOT}/embedding_pipeline/difficulty/compute_visual_neighbors.py"
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
@@ -59,7 +59,7 @@ echo "Using base config file: ${BASE_CONFIG}"
 LOG_FILE="${LOG_DIR:-.}/visual_neighbors_${SLURM_JOB_ID}.log"
 
 echo "Running visual neighbors computation at $(date '+%Y-%m-%d %H:%M:%S')"
-python "${PROJECT_ROOT}/difficulty_metadata/compute_visual_neighbors.py" --config "${BASE_CONFIG}" | tee "${LOG_FILE}"
+python "${PROJECT_ROOT}/embedding_pipeline/difficulty/compute_visual_neighbors.py" --config "${BASE_CONFIG}" | tee "${LOG_FILE}"
 EXIT_CODE=${PIPESTATUS[0]}
 
 if [ ${EXIT_CODE} -ne 0 ]; then

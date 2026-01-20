@@ -91,8 +91,8 @@ fi
 echo "Processing parquet file: ${INPUT_PARQUET}"
 
 # Step 5: Validate script exists
-if [ ! -f "${PROJECT_ROOT}/publish_model/generate_embeddings_from_parquet.py" ]; then
-    error_exit "generate_embeddings_from_parquet.py not found at ${PROJECT_ROOT}/publish_model/generate_embeddings_from_parquet.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/publish/generate_embeddings_from_parquet.py" ]; then
+    error_exit "generate_embeddings_from_parquet.py not found at ${PROJECT_ROOT}/embedding_pipeline/publish/generate_embeddings_from_parquet.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -128,7 +128,7 @@ if [ -n "${LIMIT:-}" ]; then
 fi
 
 # Run the script (unbuffered for real-time log streaming)
-python -u "${PROJECT_ROOT}/publish_model/generate_embeddings_from_parquet.py" "${CMD_ARGS[@]}"
+python -u "${PROJECT_ROOT}/embedding_pipeline/publish/generate_embeddings_from_parquet.py" "${CMD_ARGS[@]}"
 
 EXIT_CODE=$?
 

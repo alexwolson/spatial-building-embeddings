@@ -79,8 +79,8 @@ if [ "${EMBEDDING_COUNT}" -ne "${PARQUET_COUNT}" ]; then
 fi
 
 # Step 4: Verify script exists
-if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" ]; then
-    error_exit "merge_and_split.py not found at ${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/preprocess/merge_and_split.py" ]; then
+    error_exit "merge_and_split.py not found at ${PROJECT_ROOT}/embedding_pipeline/preprocess/merge_and_split.py"
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
@@ -97,7 +97,7 @@ echo "Using base config file: ${BASE_CONFIG}"
 # Step 6: Run merge and split script with base config
 echo "Starting merge and split at $(date '+%Y-%m-%d %H:%M:%S')"
 
-python "${PROJECT_ROOT}/preprocess_raw_data/merge_and_split.py" \
+python "${PROJECT_ROOT}/embedding_pipeline/preprocess/merge_and_split.py" \
     --config "${BASE_CONFIG}"
 
 EXIT_CODE=$?

@@ -14,7 +14,7 @@
 #   --venv-path <PATH>          Virtual environment path (default: ~/venv/spatial-building-embeddings)
 #   --no-venv                   Use system Python instead of managing a venv
 #   --project-root <PATH>       Override project root (defaults to repo root)
-#   --log-dir <PATH>            Override log directory (default: train_specialized_embeddings/logs/best_training)
+#   --log-dir <PATH>            Override log directory (default: embedding_pipeline/train/logs/best_training)
 #   --help                      Show this message
 #
 # Exit codes:
@@ -86,7 +86,7 @@ CONFIG_PATH="$(resolve_abs_path "${CONFIG_PATH}")"
 
 # Log dir logic: if provided, use it. If not, try config.toml. If not there, use default.
 if [ -z "${LOG_DIR}" ]; then
-    LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "train_specialized_embeddings/logs/best_training")
+    LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "embedding_pipeline/train/logs/best_training")
 else
     LOG_DIR="$(resolve_abs_path "${LOG_DIR}")"
 fi

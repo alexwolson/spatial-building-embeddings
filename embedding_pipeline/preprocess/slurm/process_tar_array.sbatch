@@ -57,8 +57,8 @@ if [ -z "${PROJECT_ROOT:-}" ]; then
     PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 fi
 
-if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" ]; then
-    error_exit "process_tar.py not found at ${PROJECT_ROOT}/preprocess_raw_data/process_tar.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/preprocess/process_tar.py" ]; then
+    error_exit "process_tar.py not found at ${PROJECT_ROOT}/embedding_pipeline/preprocess/process_tar.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -102,7 +102,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python "${PROJECT_ROOT}/preprocess_raw_data/process_tar.py" \
+python "${PROJECT_ROOT}/embedding_pipeline/preprocess/process_tar.py" \
     --config "${BASE_CONFIG}" \
     --tar-file "${TAR_FILE}" \
     --temp-dir "${EXTRACT_DIR}"

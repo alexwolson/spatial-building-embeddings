@@ -50,7 +50,7 @@ if [ ! -f "${CONFIG_PATH}" ]; then
 fi
 
 CMD=(
-    python "${PROJECT_ROOT}/train_specialized_embeddings/fetch_best_and_train.py"
+    python "${PROJECT_ROOT}/embedding_pipeline/train/fetch_best_and_train.py"
     --config "${CONFIG_PATH}"
 )
 

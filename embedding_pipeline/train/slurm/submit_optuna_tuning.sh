@@ -131,19 +131,19 @@ fi
 BASE_CONFIG_PATH="$(resolve_abs_path "${BASE_CONFIG_PATH}")"
 
 if [ -z "${TRIAL_OUTPUT_ROOT}" ]; then
-    TRIAL_OUTPUT_ROOT="${PROJECT_ROOT}/train_specialized_embeddings/optuna_trials"
+    TRIAL_OUTPUT_ROOT="${PROJECT_ROOT}/embedding_pipeline/train/optuna_trials"
 fi
 TRIAL_OUTPUT_ROOT="$(resolve_abs_path "${TRIAL_OUTPUT_ROOT}")"
 
 if [ -z "${LOG_DIR}" ]; then
-    LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "train_specialized_embeddings/logs/optuna")
+    LOG_DIR=$(get_log_dir "${PROJECT_ROOT}" "embedding_pipeline/train/logs/optuna")
 else
     LOG_DIR="$(resolve_abs_path "${LOG_DIR}")"
 fi
 
 if [ -z "${STORAGE_URL}" ]; then
     if [ -z "${STORAGE_PATH}" ]; then
-        STORAGE_PATH="${PROJECT_ROOT}/train_specialized_embeddings/optuna/optuna.db"
+        STORAGE_PATH="${PROJECT_ROOT}/embedding_pipeline/train/optuna/optuna.db"
     fi
     STORAGE_PATH="$(resolve_abs_path "${STORAGE_PATH}")"
     if [ -e "${STORAGE_PATH}" ]; then

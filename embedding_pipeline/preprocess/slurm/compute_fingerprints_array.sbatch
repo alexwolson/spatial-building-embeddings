@@ -42,8 +42,8 @@ fi
 
 echo "Processing parquet file: ${PARQUET_FILE}"
 
-if [ ! -f "${PROJECT_ROOT}/preprocess_raw_data/compute_fingerprints.py" ]; then
-    error_exit "compute_fingerprints.py not found at ${PROJECT_ROOT}/preprocess_raw_data/compute_fingerprints.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/preprocess/compute_fingerprints.py" ]; then
+    error_exit "compute_fingerprints.py not found at ${PROJECT_ROOT}/embedding_pipeline/preprocess/compute_fingerprints.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -71,7 +71,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-srun python -m preprocess_raw_data.compute_fingerprints \
+srun python -m embedding_pipeline.preprocess.compute_fingerprints \
     --config "${BASE_CONFIG}" \
     --parquet-file "${PARQUET_FILE}" \
     --temp-dir "${EXTRACT_DIR}"
