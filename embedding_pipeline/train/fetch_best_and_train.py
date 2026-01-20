@@ -26,10 +26,10 @@ from config import (
     TripletTrainingConfig,
     load_config_from_file,
 )
-from train_specialized_embeddings.train import train as run_training
+from embedding_pipeline.train.train import train as run_training
 
 
-LOGGER_NAME = "fetch_best_and_train"
+LOGGER_NAME = "embedding_pipeline.train.fetch_best_and_train"
 
 
 def setup_logging(

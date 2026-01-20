@@ -26,7 +26,7 @@ except ImportError:
 class EmbeddingProjector(nn.Module):
     """
     Configurable MLP projection head for embedding transformation.
-    (Copied from train_specialized_embeddings/model.py for self-contained publishing)
+    (Copied from embedding_pipeline/train/model.py for self-contained publishing)
     """
 
     def __init__(

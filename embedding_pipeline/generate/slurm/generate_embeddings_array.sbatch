@@ -72,8 +72,8 @@ fi
 
 echo "Processing parquet file: ${PARQUET_FILE}"
 
-if [ ! -f "${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py" ]; then
-    error_exit "generate_embeddings.py not found at ${PROJECT_ROOT}/generate_embeddings/generate_embeddings.py"
+if [ ! -f "${PROJECT_ROOT}/embedding_pipeline/generate/generate_embeddings.py" ]; then
+    error_exit "generate_embeddings.py not found at ${PROJECT_ROOT}/embedding_pipeline/generate/generate_embeddings.py"
 fi
 
 # Add project root to PYTHONPATH so imports work
@@ -117,7 +117,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-srun python -m generate_embeddings.generate_embeddings \
+srun python -m embedding_pipeline.generate.generate_embeddings \
     --config "${BASE_CONFIG}" \
     --parquet-file "${PARQUET_FILE}" \
     --temp-dir "${EXTRACT_DIR}"
